@@ -3,16 +3,15 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const twilio = require("twilio");
 const mongoose = require("mongoose");
+const { OpenAI } = require("openai");
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
 mongoose
-  .connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .catch((err) => console.error("MongoDB connection error:", err));
+  .connect(process.env.MONGO_URI)
+  .then(() => console.log("Conectado ao MongoDB com sucesso!"))
+  .catch((err) => console.error("Erro ao conectar ao MongoDB:", err));
 
 const VALID_CATEGORIES = [
   "gastos fixos",
@@ -23,21 +22,14 @@ const VALID_CATEGORIES = [
   "outro",
 ];
 
-const MESSAGE_PATTERNS = {
-  expense: [
-    /Gastei (\d+) reais com (.+) em (.+)/i,
-    /(\d+) com (.+) em (.+)/i,
-    /(\d+) em (.+) em (.+)/i,
-    /(\d+) (.+) em (.+)/i,
-  ],
-  total: [/Gasto total em (.+)/i, /Gasto total/i],
-  greeting: /^(Olá|Oi|ola|oi)/i,
-};
-
 const client = twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
 );
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 const expenseSchema = new mongoose.Schema({
   userId: String,
@@ -48,31 +40,77 @@ const expenseSchema = new mongoose.Schema({
 });
 const Expense = mongoose.model("Expense", expenseSchema);
 
-function extractExpenseData(message) {
-  for (const pattern of MESSAGE_PATTERNS.expense) {
-    const match = message.match(pattern);
-    if (match) {
-      const amount = parseFloat(match[1]);
-      const description = match[2].trim();
-      const category = match[3].trim().toLowerCase();
+async function interpretMessageWithAI(message) {
+  const prompt = `You are a highly intelligent financial assistant specializing in interpreting user messages related to personal finance, budgeting, and investment. Your task is to accurately determine the user's intent and extract structured financial data from their message. Ensure precision and contextual understanding when categorizing expenses.
 
-      if (VALID_CATEGORIES.includes(category)) {
-        return { amount, description, category, date: new Date() };
-      }
-    }
+  Instructions:
+
+  1. Identify the Intent:
+     Determine the user's intent based on their message. Possible intents include:
+      "add_expense" → The user wants to log an expense. Extract the amount, description, and category.
+      "get_total" → The user wants to retrieve the total amount spent. Extract the category if provided.
+      "greeting" → The user sends a greeting (e.g., "Oi", "Olá").
+      "instructions" → The user asks how to use the assistant or what it can do.
+      "financial_help" → The user asks a general finance-related question (e.g., investments, savings, strategies).
+      "unknown" → The message does not match any of the above intents.
+  
+  2. Extract Relevant Data:
+     When the intent is "add_expense", extract the following:
+     - Amount: A positive numerical value representing the expense amount.
+     - Description: A short but meaningful description of the expense.
+     - Category: Assign the correct category based on the description if the user does not specify it. The valid categories are:
+        "gastos fixos" (fixed expenses like rent, electricity, internet)
+        "lazer" (entertainment and leisure activities such as dining out, theater)
+        "investimento" (investments such as stocks, crypto, real estate)
+        "conhecimento" (education-related spending, courses, books)
+        "doação" (donations and charitable contributions)
+        "outro" (anything that does not fit into the above categories)
+        always try to fit the expense into one of the categories.
+
+  3. Validation & Categorization Rules:
+    - If the category is not specified, determine it based on the description.
+    - If the category is invalid or unclear, default to "outro".
+    - Ensure the amount is a valid positive number; otherwise, discard or request clarification.
+    - The assistant must read requests in Brazilian Portuguese and respond in Brazilian Portuguese.
+  
+  4. Response Format:
+     - Return a JSON object with the intent and extracted data. Use this format:
+       {
+         "intent": "add_expense" | "get_total" | "greeting" | "instructions" | "financial_help",
+         "data": {
+           "amount": number,
+           "description": string,
+           "category": string
+         }
+       }
+  
+  5. Examples of User Inputs & Correct Outputs:
+     - User: "Gastei 50 com filmes em lazer"
+       Response: { "intent": "add_expense", "data": { "amount": 50, "description": "filmes", "category": "lazer" } }
+     - User: "Qual é o meu gasto total em gastos fixos?"
+       Response: { "intent": "get_total", "data": { "category": "gastos fixos" } }
+     - User: "Olá!"
+       Response: { "intent": "greeting", "data": {} }
+     - User: "Como usar?"
+       Response: { "intent": "instructions", "data": {} }
+     - User: "Devo investir mais em ações ou renda fixa?"
+       Response: { "intent": "financial_help", "data": {} }
+  
+
+  Now, interpret this message: "${message}"`;
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [{ role: "user", content: prompt }],
+    max_tokens: 150,
+  });
+
+  try {
+    return JSON.parse(response.choices[0].message.content);
+  } catch (err) {
+    console.error("Erro ao interpretar a resposta da IA:", err);
+    return { intent: "financial_help", data: {} };
   }
-
-  for (const pattern of MESSAGE_PATTERNS.total) {
-    const match = message.match(pattern);
-    if (match) {
-      const category = match[1] ? match[1].trim().toLowerCase() : null;
-      if (!category || VALID_CATEGORIES.includes(category)) {
-        return { totalRequest: true, category };
-      }
-    }
-  }
-
-  return null;
 }
 
 async function calculateTotalExpenses(userId, category = null) {
@@ -84,7 +122,7 @@ async function calculateTotalExpenses(userId, category = null) {
     ]);
     return result.length ? result[0].total : 0;
   } catch (err) {
-    console.error("Error calculating total expenses:", err);
+    console.error("Erro ao calcular o total de despesas:", err);
     return 0;
   }
 }
@@ -95,25 +133,48 @@ function sendGreetingMessage(twiml) {
   );
 }
 
-function sendInvalidFormatMessage(twiml) {
+function sendHelpMessage(twiml) {
   twiml.message(
-    "Formato inválido. Use:\n" +
-      '"Gastei (valor) com (descrição) em (categoria)"\n' +
-      'ou "(valor) (descrição) em (categoria)"\n' +
-      "Categorias: " +
-      VALID_CATEGORIES.join(", ") +
-      '\nExemplo: "Gastei 20 reais com Açaí em lazer"'
+    `🤖 *Como usar o ADP*:\n\n` +
+      `1. Para adicionar uma despesa, digite:\n` +
+      `   - "Gastei 50 no cinema em lazer"\n` +
+      `   - "30 reais em café em outros"\n\n` +
+      `2. Para ver o total de gastos, digite:\n` +
+      `   - "Qual meu gasto total em lazer?"\n` +
+      `   - "Gasto total"\n\n` +
+      `💡 *Dica*: Você pode usar categorias como:\n` +
+      `   - Gastos fixos\n` +
+      `   - Lazer\n` +
+      `   - Investimento\n` +
+      `   - Conhecimento\n` +
+      `   - Doação\n` +
+      `   - Outro\n\n` +
+      `Exemplo completo: "Gastei 100 em mercado em gastos fixos"`
   );
 }
 
-function sendExpenseAddedMessage(twiml, expenseData, total) {
+async function sendFinancialHelpMessage(twiml, message) {
+  const prompt = `Você é um assistente financeiro especializado em ajudar usuários com dúvidas sobre investimentos, finanças pessoais e planejamento. Responda à seguinte pergunta de forma clara e útil, em português brasileiro:
+
+Pergunta: "${message}"`;
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-4",
+    messages: [{ role: "user", content: prompt }],
+    max_tokens: 300,
+  });
+
+  twiml.message(response.choices[0].message.content);
+}
+
+function sendExpenseAddedMessage(twiml, expenseData) {
   twiml.message(
-    `*Gasto adicionado*\n📌 ${expenseData.description.toUpperCase()} (_${
+    `📝 *Gasto adicionado*\n📌 ${expenseData.description.toUpperCase()} (_${
       expenseData.category.charAt(0).toUpperCase() +
       expenseData.category.slice(1)
-    }_)\n*R$ ${expenseData.amount.toFixed(
+    }_)\n💰 *R$ ${expenseData.amount.toFixed(
       2
-    )}*\n\n${expenseData.date.toLocaleDateString("pt-BR")}`
+    )}*\n\n📅 ${expenseData.date.toLocaleDateString("pt-BR")}`
   );
 }
 
@@ -129,27 +190,50 @@ app.post("/webhook", async (req, res) => {
   const userMessage = req.body.Body;
   const userId = req.body.From;
 
-  if (MESSAGE_PATTERNS.greeting.test(userMessage)) {
-    sendGreetingMessage(twiml);
-  } else {
-    const expenseData = extractExpenseData(userMessage);
+  try {
+    const interpretation = await interpretMessageWithAI(userMessage);
 
-    if (!expenseData) {
-      sendInvalidFormatMessage(twiml);
-    } else if (expenseData.totalRequest) {
-      const total = await calculateTotalExpenses(userId, expenseData.category);
-      sendTotalExpensesMessage(twiml, total, expenseData.category);
-    } else {
-      const newExpense = new Expense({ ...expenseData, userId });
-      try {
-        await newExpense.save();
-        const total = await calculateTotalExpenses(userId);
-        sendExpenseAddedMessage(twiml, expenseData, total);
-      } catch (err) {
-        console.error("Error saving expense:", err);
-        twiml.message("Erro ao salvar gasto.");
-      }
+    switch (interpretation.intent) {
+      case "add_expense":
+        const { amount, description, category } = interpretation.data;
+        if (VALID_CATEGORIES.includes(category)) {
+          const newExpense = new Expense({
+            userId,
+            amount,
+            description,
+            category,
+            date: new Date(),
+          });
+          await newExpense.save();
+          sendExpenseAddedMessage(twiml, newExpense);
+        } else {
+          sendHelpMessage(twiml);
+        }
+        break;
+
+      case "get_total":
+        const total = await calculateTotalExpenses(
+          userId,
+          interpretation.data.category
+        );
+        sendTotalExpensesMessage(twiml, total, interpretation.data.category);
+        break;
+
+      case "greeting":
+        sendGreetingMessage(twiml);
+        break;
+
+      case "financial_help":
+        await sendFinancialHelpMessage(twiml, userMessage);
+        break;
+
+      default:
+        sendHelpMessage(twiml);
+        break;
     }
+  } catch (err) {
+    console.error("Erro ao interpretar a mensagem:", err);
+    sendHelpMessage(twiml);
   }
 
   res.writeHead(200, { "Content-Type": "text/xml" });
@@ -158,5 +242,5 @@ app.post("/webhook", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Servidor rodando na porta ${PORT}`);
 });
