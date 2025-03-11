@@ -15,6 +15,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "mongoose": "^8.10.1",
+    "openai": "^4.87.2",
     "shortid": "^2.2.17",
     "twilio": "^5.4.4"
   }
