@@ -9,7 +9,9 @@ const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
 mongoose
-  .connect(process.env.MONGO_URI)
+  .connect(process.env.MONGO_URI, {
+    dbName: "prod",
+  })
   .then(() => console.log("Conectado ao MongoDB com sucesso!"))
   .catch((err) => console.error("Erro ao conectar ao MongoDB:", err));
 
