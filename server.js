@@ -9,7 +9,9 @@ const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
 mongoose
-  .connect(process.env.MONGO_URI)
+  .connect(process.env.MONGO_URI, {
+    dbName: "prod",
+  })
   .then(() => console.log("Conectado ao MongoDB com sucesso!"))
   .catch((err) => console.error("Erro ao conectar ao MongoDB:", err));
 
@@ -49,6 +51,7 @@ async function interpretMessageWithAI(message) {
      Determine the user's intent based on their message. Possible intents include:
       "add_expense" → The user wants to log an expense. Extract the amount, description, and category.
       "get_total" → The user wants to retrieve the total amount spent. Extract the category if provided.
+      "get_total_all" → The user wants to retrieve the total amount spent across all categories.
       "greeting" → The user sends a greeting (e.g., "Oi", "Olá").
       "instructions" → The user asks how to use the assistant or what it can do.
       "financial_help" → The user asks a general finance-related question (e.g., investments, savings, strategies).
@@ -76,7 +79,7 @@ async function interpretMessageWithAI(message) {
   4. Response Format:
      - Return a JSON object with the intent and extracted data. Use this format:
        {
-         "intent": "add_expense" | "get_total" | "greeting" | "instructions" | "financial_help",
+         "intent": "add_expense" | "get_total" | "get_total_all" | "greeting" | "instructions" | "financial_help",
          "data": {
            "amount": number,
            "description": string,
@@ -89,6 +92,8 @@ async function interpretMessageWithAI(message) {
        Response: { "intent": "add_expense", "data": { "amount": 50, "description": "filmes", "category": "lazer" } }
      - User: "Qual é o meu gasto total em gastos fixos?"
        Response: { "intent": "get_total", "data": { "category": "gastos fixos" } }
+     - User: "Qual é o meu gasto total?"
+       Response: { "intent": "get_total_all", "data": {} }
      - User: "Olá!"
        Response: { "intent": "greeting", "data": {} }
      - User: "Como usar?"
@@ -118,6 +123,19 @@ async function calculateTotalExpenses(userId, category = null) {
   try {
     const result = await Expense.aggregate([
       { $match: filter },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]);
+    return result.length ? result[0].total : 0;
+  } catch (err) {
+    console.error("Erro ao calcular o total de despesas:", err);
+    return 0;
+  }
+}
+
+async function calculateTotalExpensesAll(userId) {
+  try {
+    const result = await Expense.aggregate([
+      { $match: { userId } },
       { $group: { _id: null, total: { $sum: "$amount" } } },
     ]);
     return result.length ? result[0].total : 0;
@@ -185,6 +203,10 @@ function sendTotalExpensesMessage(twiml, total, category) {
   twiml.message(`*Gasto total*${categoryMessage}:\nR$ ${total.toFixed(2)}`);
 }
 
+function sendTotalExpensesAllMessage(twiml, total) {
+  twiml.message(`*Gasto total*:\nR$ ${total.toFixed(2)}`);
+}
+
 app.post("/webhook", async (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
   const userMessage = req.body.Body;
@@ -217,6 +239,11 @@ app.post("/webhook", async (req, res) => {
           interpretation.data.category
         );
         sendTotalExpensesMessage(twiml, total, interpretation.data.category);
+        break;
+
+      case "get_total_all":
+        const totalAll = await calculateTotalExpensesAll(userId);
+        sendTotalExpensesAllMessage(twiml, totalAll);
         break;
 
       case "greeting":
