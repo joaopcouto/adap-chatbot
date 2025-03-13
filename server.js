@@ -8,9 +8,11 @@ const { OpenAI } = require("openai");
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
 
+const dbName = process.env.NODE_ENV === "prod" ? "prod" : "test";
+
 mongoose
   .connect(process.env.MONGO_URI, {
-    dbName: "prod",
+    dbName: dbName,
   })
   .then(() => console.log("Conectado ao MongoDB com sucesso!"))
   .catch((err) => console.error("Erro ao conectar ao MongoDB:", err));
