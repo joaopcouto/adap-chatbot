@@ -4,6 +4,7 @@ const bodyParser = require("body-parser");
 const twilio = require("twilio");
 const mongoose = require("mongoose");
 const { OpenAI } = require("openai");
+const { customAlphabet } = require("nanoid");
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
@@ -35,12 +36,15 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+const generateId = customAlphabet("1234567890abcdef", 5);
+
 const expenseSchema = new mongoose.Schema({
   userId: String,
   amount: Number,
   description: String,
   category: { type: String, enum: VALID_CATEGORIES },
   date: { type: Date, default: Date.now },
+  messageId: String,
 });
 const Expense = mongoose.model("Expense", expenseSchema);
 
@@ -52,6 +56,7 @@ async function interpretMessageWithAI(message) {
   1. Identify the Intent:
      Determine the user's intent based on their message. Possible intents include:
       "add_expense" → The user wants to log an expense. Extract the amount, description, and category.
+      "delete_expense" → The user wants to delete an expense. Extract the messageId.
       "get_total" → The user wants to retrieve the total amount spent. Extract the category if provided.
       "get_total_all" → The user wants to retrieve the total amount spent across all categories.
       "greeting" → The user sends a greeting (e.g., "Oi", "Olá").
@@ -71,6 +76,7 @@ async function interpretMessageWithAI(message) {
         "doação" (donations and charitable contributions)
         "outro" (anything that does not fit into the above categories)
         always try to fit the expense into one of the categories.
+    When the intent is "delete_expense", extract the messageId: A short ID containing letters and numbers
 
   3. Validation & Categorization Rules:
     - If the category is not specified, determine it based on the description.
@@ -81,17 +87,20 @@ async function interpretMessageWithAI(message) {
   4. Response Format:
      - Return a JSON object with the intent and extracted data. Use this format:
        {
-         "intent": "add_expense" | "get_total" | "get_total_all" | "greeting" | "instructions" | "financial_help",
+         "intent": "add_expense" | "delete_expense" | "get_total" | "get_total_all" | "greeting" | "instructions" | "financial_help",
          "data": {
            "amount": number,
            "description": string,
-           "category": string
+           "category": string,
+           "messageId": string
          }
        }
   
   5. Examples of User Inputs & Correct Outputs:
      - User: "Gastei 50 com filmes em lazer"
        Response: { "intent": "add_expense", "data": { "amount": 50, "description": "filmes", "category": "lazer" } }
+     - User: "Remover gasto #4cdc9"
+       Response: { "intent": "delete_expense", "data": { messageId: 4cdc9 } }
      - User: "Qual é o meu gasto total em gastos fixos?"
        Response: { "intent": "get_total", "data": { "category": "gastos fixos" } }
      - User: "Qual é o meu gasto total?"
@@ -194,7 +203,16 @@ function sendExpenseAddedMessage(twiml, expenseData) {
       expenseData.category.slice(1)
     }_)\n💰 *R$ ${expenseData.amount.toFixed(
       2
-    )}*\n\n📅 ${expenseData.date.toLocaleDateString("pt-BR")}`
+    )}*\n\n📅 ${expenseData.date.toLocaleDateString("pt-BR")} - #${
+      expenseData.messageId
+    }`
+  );
+}
+
+function sendExpenseDeletedMessage(twiml, expenseData) {
+  twiml.message(
+    `❌ Gasto #_${expenseData.messageId}_ removido. 
+    `
   );
 }
 
@@ -227,11 +245,33 @@ app.post("/webhook", async (req, res) => {
             description,
             category,
             date: new Date(),
+            messageId: generateId(),
           });
           await newExpense.save();
           sendExpenseAddedMessage(twiml, newExpense);
         } else {
           sendHelpMessage(twiml);
+        }
+        break;
+
+      case "delete_expense":
+        const { messageId } = interpretation.data;
+
+        try {
+          const expense = await Expense.findOneAndDelete({ userId, messageId });
+
+          if (expense) {
+            sendExpenseDeletedMessage(twiml, expense);
+          } else {
+            twiml.message(
+              `🚫 Nenhum gasto encontrado com o ID #_${messageId}_ para exclusão.`
+            );
+          }
+        } catch (error) {
+          console.error("Erro ao excluir despesa pelo messageId:", error);
+          twiml.message(
+            "🚫 Ocorreu um erro ao tentar excluir a despesa. Tente novamente."
+          );
         }
         break;
 
