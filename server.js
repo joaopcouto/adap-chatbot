@@ -14,9 +14,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+app.use("/images", express.static("/tmp"));
 app.use(bodyParser.urlencoded({ extended: false }));
 
-const imagesPath = path.join(__dirname, "images");
+const imagesPath = "/tmp";
 app.use("/images", (req, res, next) => {
   console.log(`📂 Pedido recebido: ${req.url}`);
   express.static(imagesPath)(req, res, next);
@@ -200,15 +201,9 @@ async function generateChart(expenses, userId) {
     // 🛠️ Substituir caracteres inválidos para nome de arquivo
     const sanitizedUserId = userId.replace(/[^a-zA-Z0-9]/g, "_");
 
-    const tempFilePath = path.join(
-      __dirname,
-      `images/temp_expenses_${sanitizedUserId}.json`
-    );
-    const outputImagePath = path.join(
-      __dirname,
-      "images",
-      `report_${sanitizedUserId}.png`
-    );
+    const tempFilePath = path.join("/tmp", `temp_expenses_${sanitizedUserId}.json`)
+    ;
+    const outputImagePath = path.join("/tmp", `report_${sanitizedUserId}.png`);
 
     // 🚀 Salva o JSON corretamente antes de chamar o Python
     fs.writeFileSync(tempFilePath, JSON.stringify(expenses, null, 2));
@@ -264,7 +259,7 @@ function formatPhoneNumber(userId) {
 
 async function sendReportImage(userId, imageFilename) {
   const formattedNumber = formatPhoneNumber(userId);
-  const imageUrl = `https://2e19-187-95-20-14.ngrok-free.app/images/${imageFilename}`;
+  const imageUrl = `${process.env.BASE_URL}/images/${imageFilename}`;
 
   console.log(`📞 Enviando mensagem para: ${formattedNumber}`);
   console.log(`🖼️ URL da imagem: ${imageUrl}`);
@@ -305,15 +300,8 @@ async function generateCategoryChart(expenses, userId) {
   return new Promise((resolve, reject) => {
     const sanitizedUserId = userId.replace(/[^a-zA-Z0-9]/g, "_");
 
-    const tempFilePath = path.join(
-      __dirname,
-      `images/temp_category_${sanitizedUserId}.json`
-    );
-    const outputImagePath = path.join(
-      __dirname,
-      "images",
-      `category_report_${sanitizedUserId}.png`
-    );
+    const tempFilePath = path.join("/tmp", `temp_category_${sanitizedUserId}.json`);
+    const outputImagePath = path.join("/tmp", `category_report_${sanitizedUserId}.png`);
 
     fs.writeFileSync(tempFilePath, JSON.stringify(expenses, null, 2));
 
