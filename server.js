@@ -266,9 +266,9 @@ async function sendReportImage(userId, imageFilename) {
 
   try {
     const message = await client.messages.create({
-      from: "whatsapp:+14155238886", // Número do Twilio
+      from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`, 
       to: formattedNumber,
-      mediaUrl: [imageUrl], // MediaUrl precisa ser um array
+      mediaUrl: [imageUrl], 
       body: "📊 Relatório de gastos",
     });
 
