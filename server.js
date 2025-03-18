@@ -1,13 +1,26 @@
-require("dotenv").config();
-const express = require("express");
-const bodyParser = require("body-parser");
-const twilio = require("twilio");
-const mongoose = require("mongoose");
-const { OpenAI } = require("openai");
-const { customAlphabet } = require("nanoid");
+import "dotenv/config";
+import express from "express";
+import bodyParser from "body-parser";
+import twilio from "twilio";
+import mongoose from "mongoose";
+import { OpenAI } from "openai";
+import { customAlphabet } from "nanoid";
+import { spawn } from "child_process";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(bodyParser.urlencoded({ extended: false }));
+
+const imagesPath = path.join(__dirname, "images");
+app.use("/images", (req, res, next) => {
+  console.log(`📂 Pedido recebido: ${req.url}`);
+  express.static(imagesPath)(req, res, next);
+});
 
 const dbName = process.env.NODE_ENV === "prod" ? "prod" : "test";
 
@@ -57,6 +70,8 @@ async function interpretMessageWithAI(message) {
      Determine the user's intent based on their message. Possible intents include:
       "add_expense" → The user wants to log an expense. Extract the amount, description, and category.
       "delete_expense" → The user wants to delete an expense. Extract the messageId.
+      "generate_daily_chart" → The user wants to generate a daily expense chart. Extract the amount of days.  
+      "generate_category_chart" → The user wants to generate a category-wise expense chart. Extract the days.
       "get_total" → The user wants to retrieve the total amount spent. Extract the category if provided.
       "get_total_all" → The user wants to retrieve the total amount spent across all categories.
       "greeting" → The user sends a greeting (e.g., "Oi", "Olá").
@@ -85,14 +100,16 @@ async function interpretMessageWithAI(message) {
     - The assistant must read requests in Brazilian Portuguese and respond in Brazilian Portuguese.
   
   4. Response Format:
+       Respond only with a valid JSON object without any additional formatting or explanation
      - Return a JSON object with the intent and extracted data. Use this format:
        {
-         "intent": "add_expense" | "delete_expense" | "get_total" | "get_total_all" | "greeting" | "instructions" | "financial_help",
+         "intent": "add_expense" | "delete_expense" | "generate_daily_chart" | "generate_category_chart" | "get_total" | "get_total_all" | "greeting" | "instructions" | "financial_help",
          "data": {
            "amount": number,
            "description": string,
            "category": string,
-           "messageId": string
+           "messageId": string,
+           "days": number,
          }
        }
   
@@ -101,6 +118,10 @@ async function interpretMessageWithAI(message) {
        Response: { "intent": "add_expense", "data": { "amount": 50, "description": "filmes", "category": "lazer" } }
      - User: "Remover gasto #4cdc9"
        Response: { "intent": "delete_expense", "data": { messageId: 4cdc9 } }
+     - User: "QUAIS foram meus gastos nos últimos 10 dias?"
+       Response: { "intent": "generate_daily_chart", "data": { "days": 10}}
+     - User: "ONDE foram meus gastos nos últimos 7 dias?"
+       Response: { "intent": "generate_category_chart", "data": { "days": 7}}
      - User: "Qual é o meu gasto total em gastos fixos?"
        Response: { "intent": "get_total", "data": { "category": "gastos fixos" } }
      - User: "Qual é o meu gasto total?"
@@ -154,6 +175,185 @@ async function calculateTotalExpensesAll(userId) {
     console.error("Erro ao calcular o total de despesas:", err);
     return 0;
   }
+}
+
+async function getExpensesReport(userId, days) {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  startDate.setHours(0, 0, 0, 0);
+
+  const expenses = await Expense.aggregate([
+    { $match: { userId, date: { $gte: startDate } } },
+    {
+      $group: {
+        _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+        total: { $sum: "$amount" },
+      },
+    },
+    { $sort: { _id: 1 } },
+  ]);
+  return expenses;
+}
+
+async function generateChart(expenses, userId) {
+  return new Promise((resolve, reject) => {
+    // 🛠️ Substituir caracteres inválidos para nome de arquivo
+    const sanitizedUserId = userId.replace(/[^a-zA-Z0-9]/g, "_");
+
+    const tempFilePath = path.join(
+      __dirname,
+      `images/temp_expenses_${sanitizedUserId}.json`
+    );
+    const outputImagePath = path.join(
+      __dirname,
+      "images",
+      `report_${sanitizedUserId}.png`
+    );
+
+    // 🚀 Salva o JSON corretamente antes de chamar o Python
+    fs.writeFileSync(tempFilePath, JSON.stringify(expenses, null, 2));
+
+    // Verifica se o JSON foi salvo corretamente
+    if (!fs.existsSync(tempFilePath)) {
+      console.error("❌ Erro: O JSON não foi salvo corretamente.");
+      reject("Erro ao salvar o JSON.");
+      return;
+    }
+
+    console.log("✅ JSON salvo:", tempFilePath);
+
+    // Chama o Python para gerar o gráfico
+    const pythonCommand = process.platform === "win32" ? "python" : "python3";
+    const script = spawn(pythonCommand, [
+      "generate_chart.py",
+      tempFilePath,
+      outputImagePath,
+    ]);
+
+    script.stdout.on("data", (data) => {
+      console.log("📊 Caminho da imagem gerada:", data.toString().trim());
+
+      if (fs.existsSync(outputImagePath)) {
+        console.log("✅ Imagem gerada com sucesso!");
+        resolve(`report_${sanitizedUserId}.png`);
+      } else {
+        console.error("❌ Erro: O arquivo da imagem não foi criado!");
+        reject("Erro: A imagem não foi gerada corretamente.");
+      }
+    });
+
+    script.stderr.on("data", (data) => {
+      console.error("❌ Erro no Python:", data.toString());
+      reject("Erro na execução do Python: " + data.toString());
+    });
+
+    script.on("exit", () => {
+      console.log("🗑️ Removendo JSON temporário...");
+      // fs.unlinkSync(tempFilePath);
+    });
+  });
+}
+
+function formatPhoneNumber(userId) {
+  let formatted = userId.replace(/\s+/g, "").trim(); // Remove espaços extras
+  if (!formatted.startsWith("whatsapp:")) {
+    formatted = `whatsapp:${formatted}`;
+  }
+  return formatted;
+}
+
+async function sendReportImage(userId, imageFilename) {
+  const formattedNumber = formatPhoneNumber(userId);
+  const imageUrl = `https://2e19-187-95-20-14.ngrok-free.app/images/${imageFilename}`;
+
+  console.log(`📞 Enviando mensagem para: ${formattedNumber}`);
+  console.log(`🖼️ URL da imagem: ${imageUrl}`);
+
+  try {
+    const message = await client.messages.create({
+      from: "whatsapp:+14155238886", // Número do Twilio
+      to: formattedNumber,
+      mediaUrl: [imageUrl], // MediaUrl precisa ser um array
+      body: "📊 Relatório de gastos",
+    });
+
+    console.log(`✅ Mensagem enviada com sucesso! SID: ${message.sid}`);
+  } catch (error) {
+    console.error("❌ Erro ao enviar relatório:", error);
+  }
+}
+
+async function getCategoryReport(userId, days) {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  startDate.setHours(0, 0, 0, 0);
+
+  const categoryExpenses = await Expense.aggregate([
+    { $match: { userId, date: { $gte: startDate } } },
+    {
+      $group: {
+        _id: "$category",
+        total: { $sum: "$amount" },
+      },
+    },
+  ]);
+
+  return categoryExpenses;
+}
+
+async function generateCategoryChart(expenses, userId) {
+  return new Promise((resolve, reject) => {
+    const sanitizedUserId = userId.replace(/[^a-zA-Z0-9]/g, "_");
+
+    const tempFilePath = path.join(
+      __dirname,
+      `images/temp_category_${sanitizedUserId}.json`
+    );
+    const outputImagePath = path.join(
+      __dirname,
+      "images",
+      `category_report_${sanitizedUserId}.png`
+    );
+
+    fs.writeFileSync(tempFilePath, JSON.stringify(expenses, null, 2));
+
+    if (!fs.existsSync(tempFilePath)) {
+      console.error("❌ Erro: O JSON não foi salvo corretamente.");
+      reject("Erro ao salvar o JSON.");
+      return;
+    }
+
+    console.log("✅ JSON salvo:", tempFilePath);
+
+    const pythonCommand = process.platform === "win32" ? "python" : "python3";
+    const script = spawn(pythonCommand, [
+      "generate_category_chart.py",
+      tempFilePath,
+      outputImagePath,
+    ]);
+
+    script.stdout.on("data", (data) => {
+      console.log("📊 Caminho da imagem gerada:", data.toString().trim());
+
+      if (fs.existsSync(outputImagePath)) {
+        console.log("✅ Imagem gerada com sucesso!");
+        resolve(`category_report_${sanitizedUserId}.png`);
+      } else {
+        console.error("❌ Erro: O arquivo da imagem não foi criado!");
+        reject("Erro: A imagem não foi gerada corretamente.");
+      }
+    });
+
+    script.stderr.on("data", (data) => {
+      console.error("❌ Erro no Python:", data.toString());
+      reject("Erro na execução do Python: " + data.toString());
+    });
+
+    script.on("exit", () => {
+      console.log("🗑️ Removendo JSON temporário...");
+      // fs.unlinkSync(tempFilePath);
+    });
+  });
 }
 
 function sendGreetingMessage(twiml) {
@@ -271,6 +471,51 @@ app.post("/webhook", async (req, res) => {
           console.error("Erro ao excluir despesa pelo messageId:", error);
           twiml.message(
             "🚫 Ocorreu um erro ao tentar excluir a despesa. Tente novamente."
+          );
+        }
+        break;
+
+      case "generate_daily_chart":
+        try {
+          const days = interpretation.data.days || 7;
+          const reportData = await getExpensesReport(userId, days);
+
+          if (reportData.length === 0) {
+            twiml.message(
+              `📉 Não há registros de gastos nos últimos ${days} dias.`
+            );
+          } else {
+            const imageFilename = await generateChart(reportData, userId);
+            await sendReportImage(userId, imageFilename);
+          }
+        } catch (error) {
+          console.error("Erro ao gerar gráfico:", error);
+          twiml.message(
+            "❌ Ocorreu um erro ao gerar o relatório. Tente novamente."
+          );
+        }
+        break;
+
+      case "generate_category_chart":
+        try {
+          const days = interpretation.data.days || 30; // Por padrão, pega os últimos 30 dias
+          const categoryReport = await getCategoryReport(userId, days);
+
+          if (categoryReport.length === 0) {
+            twiml.message(
+              `📊 Não há registros de gastos nos últimos ${days} dias para gerar um relatório por categoria.`
+            );
+          } else {
+            const imageFilename = await generateCategoryChart(
+              categoryReport,
+              userId
+            );
+            await sendReportImage(userId, imageFilename);
+          }
+        } catch (error) {
+          console.error("Erro ao gerar gráfico por categorias:", error);
+          twiml.message(
+            "❌ Ocorreu um erro ao gerar o relatório por categorias. Tente novamente."
           );
         }
         break;
