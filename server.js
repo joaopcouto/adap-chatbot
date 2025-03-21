@@ -9,6 +9,9 @@ import { spawn } from "child_process";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import axios from "axios";
+import FormData from "form-data";
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -198,17 +201,14 @@ async function getExpensesReport(userId, days) {
 
 async function generateChart(expenses, userId) {
   return new Promise((resolve, reject) => {
-    // 🛠️ Substituir caracteres inválidos para nome de arquivo
     const sanitizedUserId = userId.replace(/[^a-zA-Z0-9]/g, "_");
 
-    const tempFilePath = path.join("/tmp", `temp_expenses_${sanitizedUserId}.json`)
-    ;
+    const tempFilePath = path.join("/tmp", `temp_expenses_${sanitizedUserId}.json`);
     const outputImagePath = path.join("/tmp", `report_${sanitizedUserId}.png`);
 
-    // 🚀 Salva o JSON corretamente antes de chamar o Python
+    // 🚀 Salvar o JSON para o Python ler
     fs.writeFileSync(tempFilePath, JSON.stringify(expenses, null, 2));
 
-    // Verifica se o JSON foi salvo corretamente
     if (!fs.existsSync(tempFilePath)) {
       console.error("❌ Erro: O JSON não foi salvo corretamente.");
       reject("Erro ao salvar o JSON.");
@@ -217,34 +217,49 @@ async function generateChart(expenses, userId) {
 
     console.log("✅ JSON salvo:", tempFilePath);
 
-    // Chama o Python para gerar o gráfico
     const pythonCommand = process.platform === "win32" ? "python" : "python3";
+
     const script = spawn(pythonCommand, [
       "generate_chart.py",
       tempFilePath,
       outputImagePath,
     ]);
 
-    script.stdout.on("data", (data) => {
-      console.log("📊 Caminho da imagem gerada:", data.toString().trim());
+    let imageUrl = "";
+    let errorOutput = "";
 
-      if (fs.existsSync(outputImagePath)) {
-        console.log("✅ Imagem gerada com sucesso!");
-        resolve(`report_${sanitizedUserId}.png`);
-      } else {
-        console.error("❌ Erro: O arquivo da imagem não foi criado!");
-        reject("Erro: A imagem não foi gerada corretamente.");
+    script.stdout.on("data", (data) => {
+      const output = data.toString().trim();
+      console.log("📤 Saída do Python:", output);
+
+      // Se for uma URL válida, armazenar
+      if (output.startsWith("http")) {
+        imageUrl = output;
       }
     });
 
     script.stderr.on("data", (data) => {
-      console.error("❌ Erro no Python:", data.toString());
-      reject("Erro na execução do Python: " + data.toString());
+      const error = data.toString();
+      errorOutput += error;
+      console.error("❌ Erro do Python:", error);
     });
 
-    script.on("exit", () => {
-      console.log("🗑️ Removendo JSON temporário...");
-      // fs.unlinkSync(tempFilePath);
+    script.on("exit", (code) => {
+      console.log("🚪 Script Python finalizado com código:", code);
+      console.log("🗑️ Limpando arquivos temporários...");
+
+      try {
+        fs.unlinkSync(tempFilePath);
+        // fs.unlinkSync(outputImagePath); // opcional
+      } catch (err) {
+        console.warn("⚠️ Erro ao remover arquivos temporários:", err.message);
+      }
+
+      if (imageUrl) {
+        resolve(imageUrl);
+      } else {
+        reject("Erro ao gerar ou obter URL da imagem.\n" + errorOutput);
+      }
     });
   });
 }
@@ -257,18 +272,46 @@ function formatPhoneNumber(userId) {
   return formatted;
 }
 
-async function sendReportImage(userId, imageFilename) {
-  const formattedNumber = formatPhoneNumber(userId);
-  const imageUrl = `${process.env.BASE_URL}/images/${imageFilename}`;
+async function uploadToImgur(imagePath) {
+  const clientId = process.env.IMGUR_CLIENT_ID;
 
-  console.log(`📞 Enviando mensagem para: ${formattedNumber}`);
-  console.log(`🖼️ URL da imagem: ${imageUrl}`);
+  if (!clientId) {
+    console.error("❌ Imgur Client ID não encontrado no .env");
+    return null;
+  }
+
+  const form = new FormData();
+  form.append("image", fs.createReadStream(imagePath));
+
+  try {
+    const response = await axios.post("https://api.imgur.com/3/image", form, {
+      headers: {
+        ...form.getHeaders(),
+        Authorization: `Client-ID ${clientId}`,
+      },
+    });
+
+    if (response.data && response.data.success) {
+      console.log("✅ Upload para Imgur feito:", response.data.data.link);
+      return response.data.data.link;
+    } else {
+      console.error("❌ Upload falhou:", response.data);
+      return null;
+    }
+  } catch (err) {
+    console.error("❌ Erro no upload Imgur:", err.message);
+    return null;
+  }
+}
+
+async function sendReportImage(userId, imageUrl) {
+  const formattedNumber = formatPhoneNumber(userId);
 
   try {
     const message = await client.messages.create({
-      from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`, 
+      from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
       to: formattedNumber,
-      mediaUrl: [imageUrl], 
+      mediaUrl: [imageUrl],
       body: "📊 Relatório de gastos",
     });
 
@@ -277,6 +320,7 @@ async function sendReportImage(userId, imageFilename) {
     console.error("❌ Erro ao enviar relatório:", error);
   }
 }
+
 
 async function getCategoryReport(userId, days) {
   const startDate = new Date();
@@ -320,17 +364,25 @@ async function generateCategoryChart(expenses, userId) {
       outputImagePath,
     ]);
 
-    script.stdout.on("data", (data) => {
-      console.log("📊 Caminho da imagem gerada:", data.toString().trim());
+    let imageUrl = "";
+script.stdout.on("data", (data) => {
+  const output = data.toString().trim();
+  console.log("📊 Caminho da imagem gerada:", output);
 
-      if (fs.existsSync(outputImagePath)) {
-        console.log("✅ Imagem gerada com sucesso!");
-        resolve(`category_report_${sanitizedUserId}.png`);
-      } else {
-        console.error("❌ Erro: O arquivo da imagem não foi criado!");
-        reject("Erro: A imagem não foi gerada corretamente.");
-      }
-    });
+  if (output.startsWith("http")) {
+    imageUrl = output;
+  }
+});
+
+script.on("exit", () => {
+  fs.unlinkSync(tempFilePath);
+  if (imageUrl) {
+    resolve(imageUrl);
+  } else {
+    reject("Erro ao gerar ou obter URL da imagem.");
+  }
+});
+
 
     script.stderr.on("data", (data) => {
       console.error("❌ Erro no Python:", data.toString());
@@ -346,27 +398,53 @@ async function generateCategoryChart(expenses, userId) {
 
 function sendGreetingMessage(twiml) {
   twiml.message(
-    `Olá! Bem-vindo! 🤗\n\nAqui está um breve tutorial:\n\n1️⃣ Digite um gasto (Ex.: Gastei 150 reais no mercado em gastos fixos).\n2️⃣ Veja seu dinheiro controlado!\n\n💬 Teste agora: “Gastei 50 com cinema em lazer”`
+    `const mensagem = "👋 Oi, eu sou a ADAP – sua Assistente Direta ao Ponto.\n\n" +
+"Fui criada para te ajudar a organizar suas finanças de forma simples, direto por aqui no WhatsApp, sem complicação. 📊💸\n\n" +
+"Comigo, você consegue:\n\n" +
+"1️⃣ Anotar seus gastos em segundos\n" +
+"2️⃣ Acompanhar seus gastos por categoria (Lazer, Gastos fixos, etc.)\n" +
+"3️⃣ Acompanhar seu gasto total\n" +
+"4️⃣ Simples de remover um gasto caso anote errado\n" +
+"5️⃣ Gerar relatório de gastos por dia da semana\n" +
+"6️⃣ Gerar relatório de gastos por categoria\n" +
+"7️⃣ Dicas financeiras para o seu dia a dia\n\n" +
+"E tudo isso de forma automática. É só me mandar mensagens simples como:\n\n" +
+"1️⃣ \"25 mercado\"\n" +
+"2️⃣ \"gasto total lazer\"\n" +
+"3️⃣ \"gasto total\"\n" +
+"4️⃣ \"remover #(código do gasto)\"\n" +
+"5️⃣ \"quanto gastei nos últimos 7 dias\"\n" +
+"6️⃣ \"onde foram meus gastos nos últimos 7 dias\"\n" +
+"7️⃣ \"onde posso deixar meu dinheiro para render mais?\"\n\n" +
+"🔐 Seus dados são 100% seguros e privados.\n\n" +
+"Ah, e aproveita pra me seguir no Instagram também: @economia.em.30seg\n\n" +
+"Lá tem dicas diárias pra você gastar melhor e fazer seu dinheiro render mais! 🚀";`
   );
 }
 
 function sendHelpMessage(twiml) {
   twiml.message(
-    `🤖 *Como usar o ADP*:\n\n` +
-      `1. Para adicionar uma despesa, digite:\n` +
-      `   - "Gastei 50 no cinema em lazer"\n` +
-      `   - "30 reais em café em outros"\n\n` +
-      `2. Para ver o total de gastos, digite:\n` +
-      `   - "Qual meu gasto total em lazer?"\n` +
-      `   - "Gasto total"\n\n` +
-      `💡 *Dica*: Você pode usar categorias como:\n` +
-      `   - Gastos fixos\n` +
-      `   - Lazer\n` +
-      `   - Investimento\n` +
-      `   - Conhecimento\n` +
-      `   - Doação\n` +
-      `   - Outro\n\n` +
-      `Exemplo completo: "Gastei 100 em mercado em gastos fixos"`
+    `const mensagem = "👋 Oi, eu sou a ADAP – sua Assistente Direta ao Ponto.\n\n" +
+"Fui criada para te ajudar a organizar suas finanças de forma simples, direto por aqui no WhatsApp, sem complicação. 📊💸\n\n" +
+"Comigo, você consegue:\n\n" +
+"1️⃣ Anotar seus gastos em segundos\n" +
+"2️⃣ Acompanhar seus gastos por categoria (Lazer, Gastos fixos, etc.)\n" +
+"3️⃣ Acompanhar seu gasto total\n" +
+"4️⃣ Simples de remover um gasto caso anote errado\n" +
+"5️⃣ Gerar relatório de gastos por dia da semana\n" +
+"6️⃣ Gerar relatório de gastos por categoria\n" +
+"7️⃣ Dicas financeiras para o seu dia a dia\n\n" +
+"E tudo isso de forma automática. É só me mandar mensagens simples como:\n\n" +
+"1️⃣ \"25 mercado\"\n" +
+"2️⃣ \"gasto total lazer\"\n" +
+"3️⃣ \"gasto total\"\n" +
+"4️⃣ \"remover #(código do gasto)\"\n" +
+"5️⃣ \"quanto gastei nos últimos 7 dias\"\n" +
+"6️⃣ \"onde foram meus gastos nos últimos 7 dias\"\n" +
+"7️⃣ \"onde posso deixar meu dinheiro para render mais?\"\n\n" +
+"🔐 Seus dados são 100% seguros e privados.\n\n" +
+"Ah, e aproveita pra me seguir no Instagram também: @economia.em.30seg\n\n" +
+"Lá tem dicas diárias pra você gastar melhor e fazer seu dinheiro render mais! 🚀";`
   );
 }
 
@@ -464,25 +542,24 @@ app.post("/webhook", async (req, res) => {
         break;
 
       case "generate_daily_chart":
-        try {
-          const days = interpretation.data.days || 7;
-          const reportData = await getExpensesReport(userId, days);
+  try {
+    const days = interpretation.data.days || 7;
+    const reportData = await getExpensesReport(userId, days);
 
-          if (reportData.length === 0) {
-            twiml.message(
-              `📉 Não há registros de gastos nos últimos ${days} dias.`
-            );
-          } else {
-            const imageFilename = await generateChart(reportData, userId);
-            await sendReportImage(userId, imageFilename);
-          }
-        } catch (error) {
-          console.error("Erro ao gerar gráfico:", error);
-          twiml.message(
-            "❌ Ocorreu um erro ao gerar o relatório. Tente novamente."
-          );
-        }
-        break;
+    if (reportData.length === 0) {
+      twiml.message(
+        `📉 Não há registros de gastos nos últimos ${days} dias.`
+      );
+    } else {
+      const imageUrl = await generateChart(reportData, userId); 
+      await sendReportImage(userId, imageUrl); 
+    }
+  } catch (error) {
+    console.error("Erro ao gerar gráfico:", error);
+    twiml.message("❌ Ocorreu um erro ao gerar o relatório. Tente novamente.");
+  }
+  break;
+
 
       case "generate_category_chart":
         try {
