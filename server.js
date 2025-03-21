@@ -398,53 +398,71 @@ script.on("exit", () => {
 
 function sendGreetingMessage(twiml) {
   twiml.message(
-    `const mensagem = "👋 Oi, eu sou a ADAP – sua Assistente Direta ao Ponto.\n\n" +
-"Fui criada para te ajudar a organizar suas finanças de forma simples, direto por aqui no WhatsApp, sem complicação. 📊💸\n\n" +
-"Comigo, você consegue:\n\n" +
-"1️⃣ Anotar seus gastos em segundos\n" +
-"2️⃣ Acompanhar seus gastos por categoria (Lazer, Gastos fixos, etc.)\n" +
-"3️⃣ Acompanhar seu gasto total\n" +
-"4️⃣ Simples de remover um gasto caso anote errado\n" +
-"5️⃣ Gerar relatório de gastos por dia da semana\n" +
-"6️⃣ Gerar relatório de gastos por categoria\n" +
-"7️⃣ Dicas financeiras para o seu dia a dia\n\n" +
-"E tudo isso de forma automática. É só me mandar mensagens simples como:\n\n" +
-"1️⃣ \"25 mercado\"\n" +
-"2️⃣ \"gasto total lazer\"\n" +
-"3️⃣ \"gasto total\"\n" +
-"4️⃣ \"remover #(código do gasto)\"\n" +
-"5️⃣ \"quanto gastei nos últimos 7 dias\"\n" +
-"6️⃣ \"onde foram meus gastos nos últimos 7 dias\"\n" +
-"7️⃣ \"onde posso deixar meu dinheiro para render mais?\"\n\n" +
-"🔐 Seus dados são 100% seguros e privados.\n\n" +
-"Ah, e aproveita pra me seguir no Instagram também: @economia.em.30seg\n\n" +
-"Lá tem dicas diárias pra você gastar melhor e fazer seu dinheiro render mais! 🚀";`
+    `
+👋 Oi, eu sou a ADAP – sua Assistente Direta ao Ponto.
+
+Fui criada para te ajudar a organizar suas finanças de forma simples, direto por aqui no WhatsApp, sem complicação. 📊💸
+
+Comigo, você consegue:
+
+1️⃣ Anotar seus gastos em segundos
+2️⃣ Acompanhar seus gastos por categoria (Lazer, Gastos fixos, etc.)
+3️⃣ Acompanhar seu gasto total
+4️⃣ Simples de remover um gasto caso anote errado
+5️⃣ Gerar relatório de gastos por dia da semana
+6️⃣ Gerar relatório de gastos por categoria
+7️⃣ Dicas financeiras para o seu dia a dia
+
+E tudo isso de forma automática. É só me mandar mensagens simples como:
+
+1️⃣ "25 mercado"
+2️⃣ "gasto total lazer"
+3️⃣ "gasto total"
+4️⃣ "remover #(código do gasto)"
+5️⃣ "quanto gastei nos últimos 7 dias"
+6️⃣ "onde foram meus gastos nos últimos 7 dias"
+7️⃣ "onde posso deixar meu dinheiro para render mais?"
+
+🔐 Seus dados são 100% seguros e privados.
+
+Ah, e aproveita pra me seguir no Instagram também: @economia.em.30seg
+
+Lá tem dicas diárias pra você gastar melhor e fazer seu dinheiro render mais! 🚀`
   );
 }
 
 function sendHelpMessage(twiml) {
   twiml.message(
-    `const mensagem = "👋 Oi, eu sou a ADAP – sua Assistente Direta ao Ponto.\n\n" +
-"Fui criada para te ajudar a organizar suas finanças de forma simples, direto por aqui no WhatsApp, sem complicação. 📊💸\n\n" +
-"Comigo, você consegue:\n\n" +
-"1️⃣ Anotar seus gastos em segundos\n" +
-"2️⃣ Acompanhar seus gastos por categoria (Lazer, Gastos fixos, etc.)\n" +
-"3️⃣ Acompanhar seu gasto total\n" +
-"4️⃣ Simples de remover um gasto caso anote errado\n" +
-"5️⃣ Gerar relatório de gastos por dia da semana\n" +
-"6️⃣ Gerar relatório de gastos por categoria\n" +
-"7️⃣ Dicas financeiras para o seu dia a dia\n\n" +
-"E tudo isso de forma automática. É só me mandar mensagens simples como:\n\n" +
-"1️⃣ \"25 mercado\"\n" +
-"2️⃣ \"gasto total lazer\"\n" +
-"3️⃣ \"gasto total\"\n" +
-"4️⃣ \"remover #(código do gasto)\"\n" +
-"5️⃣ \"quanto gastei nos últimos 7 dias\"\n" +
-"6️⃣ \"onde foram meus gastos nos últimos 7 dias\"\n" +
-"7️⃣ \"onde posso deixar meu dinheiro para render mais?\"\n\n" +
-"🔐 Seus dados são 100% seguros e privados.\n\n" +
-"Ah, e aproveita pra me seguir no Instagram também: @economia.em.30seg\n\n" +
-"Lá tem dicas diárias pra você gastar melhor e fazer seu dinheiro render mais! 🚀";`
+    `
+👋 Oi, eu sou a ADAP – sua Assistente Direta ao Ponto.
+
+Fui criada para te ajudar a organizar suas finanças de forma simples, direto por aqui no WhatsApp, sem complicação. 📊💸
+
+Comigo, você consegue:
+
+1️⃣ Anotar seus gastos em segundos
+2️⃣ Acompanhar seus gastos por categoria (Lazer, Gastos fixos, etc.)
+3️⃣ Acompanhar seu gasto total
+4️⃣ Simples de remover um gasto caso anote errado
+5️⃣ Gerar relatório de gastos por dia da semana
+6️⃣ Gerar relatório de gastos por categoria
+7️⃣ Dicas financeiras para o seu dia a dia
+
+E tudo isso de forma automática. É só me mandar mensagens simples como:
+
+1️⃣ "25 mercado"
+2️⃣ "gasto total lazer"
+3️⃣ "gasto total"
+4️⃣ "remover #(código do gasto)"
+5️⃣ "quanto gastei nos últimos 7 dias"
+6️⃣ "onde foram meus gastos nos últimos 7 dias"
+7️⃣ "onde posso deixar meu dinheiro para render mais?"
+
+🔐 Seus dados são 100% seguros e privados.
+
+Ah, e aproveita pra me seguir no Instagram também: @economia.em.30seg
+
+Lá tem dicas diárias pra você gastar melhor e fazer seu dinheiro render mais! 🚀;`
   );
 }
 
