@@ -14,6 +14,7 @@ import {
 } from "../services/chartService.js";
 import { sendReportImage } from "../services/twilioService.js";
 import Expense from "../models/Expense.js";
+import UserStats from "../models/UserStats.js";
 import { customAlphabet } from "nanoid";
 import {
   sendGreetingMessage,
@@ -23,6 +24,7 @@ import {
   sendTotalExpensesMessage,
   sendTotalExpensesAllMessage,
   sendFinancialHelpMessage,
+  sendTotalExpensesLastMonthsMessage,
 } from "../helpers/messages.js";
 import { VALID_CATEGORIES } from "../utils/constants.js";
 
@@ -52,6 +54,11 @@ router.post("/", async (req, res) => {
           });
           await newExpense.save();
           sendExpenseAddedMessage(twiml, newExpense);
+          await UserStats.findOneAndUpdate(
+            { userId },
+            { $inc: { totalSpent: amount } },
+            { upsert: true }
+          );
         } else {
           sendHelpMessage(twiml);
         }
@@ -65,6 +72,10 @@ router.post("/", async (req, res) => {
 
           if (expense) {
             sendExpenseDeletedMessage(twiml, expense);
+            await UserStats.findOneAndUpdate(
+              { userId },
+              { $inc: { totalSpent: -expense.amount } }
+            );
           } else {
             twiml.message(
               `🚫 Nenhum gasto encontrado com o ID #_${messageId}_ para exclusão.`
@@ -134,6 +145,40 @@ router.post("/", async (req, res) => {
       case "get_total_all":
         const totalAll = await calculateTotalExpensesAll(userId);
         sendTotalExpensesAllMessage(twiml, totalAll);
+        break;
+
+      case "get_total_last_months":
+        const getCurrentMonthFormatted = () => {
+          const date = new Date();
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, '0'); // +1 porque janeiro = 0
+          return `${year}-${month}`;
+        };
+
+        const currentMonth = getCurrentMonthFormatted();
+
+        const monthName = interpretation.data.monthName;
+
+        const interpretationDataMonth = interpretation.data.month;
+
+        if (interpretationDataMonth < "2025-01" || interpretationDataMonth > currentMonth) {
+          twiml.message("🚫 Mês inválido. Tente novamente.");
+          break;
+        } else {
+          const spendingHistoryLastMonths = await UserStats.aggregate([
+            { $match: { userId } },
+            { $unwind: "$spendingHistory" },
+            { $match: { "spendingHistory.month": interpretationDataMonth } },
+            { $group: { _id: null, total: { $sum: "$spendingHistory.amount" } } },
+          ]);
+
+          sendTotalExpensesLastMonthsMessage(
+            twiml,
+            spendingHistoryLastMonths,
+            monthName
+          );
+        }
+
         break;
 
       case "greeting":

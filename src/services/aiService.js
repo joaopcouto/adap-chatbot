@@ -17,6 +17,7 @@ export async function interpretMessageWithAI(message) {
       "generate_category_chart" → The user wants to generate a category-wise expense chart. Extract the days.
       "get_total" → The user wants to retrieve the total amount spent. Extract the category if provided.
       "get_total_all" → The user wants to retrieve the total amount spent across all categories.
+      "get_total_last_months" → The user wants to retrieve the total amount spent in the last months. Extract the month in two formats: "YYYY-MM" and "January 2025". If the user specify the past month, the assistant should return the total amount spent in that month.
       "greeting" → The user sends a greeting (e.g., "Oi", "Olá").
       "instructions" → The user asks how to use the assistant or what it can do.
       "financial_help" → The user asks a general finance-related question (e.g., investments, savings, strategies).
@@ -46,13 +47,15 @@ export async function interpretMessageWithAI(message) {
        Respond only with a valid JSON object without any additional formatting or explanation
      - Return a JSON object with the intent and extracted data. Use this format:
        {
-         "intent": "add_expense" | "delete_expense" | "generate_daily_chart" | "generate_category_chart" | "get_total" | "get_total_all" | "greeting" | "instructions" | "financial_help",
+         "intent": "add_expense" | "delete_expense" | "generate_daily_chart" | "generate_category_chart" | "get_total" | "get_total_all" | "get_total_last_months" | "greeting" | "instructions" | "financial_help",
          "data": {
            "amount": number,
            "description": string,
            "category": string,
            "messageId": string,
            "days": number,
+           "month": string,
+           "monthName": string,
          }
        }
   
@@ -69,6 +72,8 @@ export async function interpretMessageWithAI(message) {
        Response: { "intent": "get_total", "data": { "category": "gastos fixos" } }
      - User: "Qual é o meu gasto total?"
        Response: { "intent": "get_total_all", "data": {} }
+     - User: "Quanto gastei no mês de fevereiro?" 
+       Response: { "intent": "get_total_last_months", "data": { "month": "2025-02", "monthName": "Fevereiro" }}
      - User: "Olá!"
        Response: { "intent": "greeting", "data": {} }
      - User: "Como usar?"

@@ -96,6 +96,10 @@ export function sendTotalExpensesAllMessage(twiml, total) {
   twiml.message(`*Gasto total*:\nR$ ${total.toFixed(2)}`);
 }
 
+export function sendTotalExpensesLastMonthsMessage(twiml, spendingHistoryLastMonths, monthName) {
+  twiml.message(`*Gasto total em ${monthName}*:\nR$ ${spendingHistoryLastMonths[0].total.toFixed(2)}`);
+}
+
 export async function sendFinancialHelpMessage(twiml, message) {
   const prompt = `You are a financial assistant who specializes in helping users with questions about investments, personal finance and planning. Please answer the following question clearly and helpfully, in Brazilian Portuguese:
 
