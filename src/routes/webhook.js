@@ -4,9 +4,9 @@ import twilio from "twilio";
 import { interpretMessageWithAI } from "../services/aiService.js";
 import {
   calculateTotalExpenses,
-  calculateTotalExpensesAll,
   getExpensesReport,
   getCategoryReport,
+  getCurrentTotalSpent
 } from "../helpers/totalUtils.js";
 import {
   generateChart,
