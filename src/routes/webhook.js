@@ -143,7 +143,7 @@ router.post("/", async (req, res) => {
         break;
 
       case "get_total_all":
-        const totalAll = await calculateTotalExpensesAll(userId);
+        const totalAll = await getCurrentTotalSpent(userId);
         sendTotalExpensesAllMessage(twiml, totalAll);
         break;
 
