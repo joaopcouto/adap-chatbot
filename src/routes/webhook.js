@@ -6,6 +6,7 @@ import {
   calculateTotalExpenses,
   getExpensesReport,
   getCategoryReport,
+  getCurrentTotalSpent
 } from "../helpers/totalUtils.js";
 import {
   generateChart,
