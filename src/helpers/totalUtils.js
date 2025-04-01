@@ -1,4 +1,5 @@
 import Expense from "../models/Expense.js";
+import UserStats from "../models/UserStats.js";
 
 export async function calculateTotalExpenses(userId, category = null) {
   const filter = category ? { userId, category } : { userId };
@@ -9,15 +10,12 @@ export async function calculateTotalExpenses(userId, category = null) {
   return result.length ? result[0].total : 0;
 }
 
-export async function calculateTotalExpensesAll(userId) {
+export async function getCurrentTotalSpent(userId) {
   try {
-    const result = await Expense.aggregate([
-      { $match: { userId } },
-      { $group: { _id: null, total: { $sum: "$amount" } } },
-    ]);
-    return result.length ? result[0].total : 0;
+    const userStats = await UserStats.findOne({ userId });
+    return userStats?.totalSpent || 0;
   } catch (err) {
-    console.error("Erro ao calcular o total de despesas:", err);
+    console.error("Erro ao buscar totalSpent:", err);
     return 0;
   }
 }

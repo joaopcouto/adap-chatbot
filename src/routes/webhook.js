@@ -4,9 +4,9 @@ import twilio from "twilio";
 import { interpretMessageWithAI } from "../services/aiService.js";
 import {
   calculateTotalExpenses,
-  calculateTotalExpensesAll,
   getExpensesReport,
   getCategoryReport,
+  getCurrentTotalSpent
 } from "../helpers/totalUtils.js";
 import {
   generateChart,
@@ -143,7 +143,7 @@ router.post("/", async (req, res) => {
         break;
 
       case "get_total_all":
-        const totalAll = await calculateTotalExpensesAll(userId);
+        const totalAll = await getCurrentTotalSpent(userId);
         sendTotalExpensesAllMessage(twiml, totalAll);
         break;
 
