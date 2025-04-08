@@ -205,10 +205,6 @@ router.post("/", async (req, res) => {
         break;
 
       case "generate_category_chart":
-        if (!(await hasAcessToFeature(userId, "category_chart"))) {
-          twiml.message("🚫 Este recurso está disponível como um complemento pago. Acesse o site para ativar.");
-          break;
-        }
         try {
           const days = interpretation.data.days || 30; // Por padrão, pega os últimos 30 dias
           const categoryReport = await getCategoryReport(userId, days);
