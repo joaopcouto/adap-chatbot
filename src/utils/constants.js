@@ -4,5 +4,5 @@ export const VALID_CATEGORIES = [
     "investimento",
     "conhecimento",
     "doação",
-    "outro",
   ];  
+

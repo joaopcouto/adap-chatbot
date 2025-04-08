@@ -1,13 +1,15 @@
 import Expense from "../models/Expense.js";
 import UserStats from "../models/UserStats.js";
 
-export async function calculateTotalExpenses(userId, category = null) {
-  const filter = category ? { userId, category } : { userId };
-  const result = await Expense.aggregate([
+export async function calculateTotalExpenses(userId, category = null) {   
+  const filter = category
+  ? { userId, category: { $regex: new RegExp(`^${category.trim()}$`, "i") } } 
+  : { userId };
+  const result = await Expense.aggregate([  
     { $match: filter },
-    { $group: { _id: null, total: { $sum: "$amount" } } },
+    { $group: { _id: null, total: { $sum: "$amount" } } }, 
   ]);
-  return result.length ? result[0].total : 0;
+  return result.length ? result[0].total : 0; 
 }
 
 export async function getCurrentTotalSpent(userId) {

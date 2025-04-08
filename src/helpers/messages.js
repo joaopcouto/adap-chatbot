@@ -113,3 +113,4 @@ export async function sendFinancialHelpMessage(twiml, message) {
 
   twiml.message(response.choices[0].message.content);
 }
+
