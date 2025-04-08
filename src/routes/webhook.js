@@ -114,10 +114,10 @@ router.post("/", async (req, res) => {
         break;
 
       case "add_expense_new_category":
-        // if (!(await hasAcessToFeature(userId, "add_expense_new_category"))) {
-        //   twiml.message("🚫 Este recurso está disponível como um complemento pago. Acesse o site para ativar: ")
-        //   break;
-        // }
+        if (!(await hasAcessToFeature(userId, "add_expense_new_category"))) {
+          twiml.message("🚫 Este recurso está disponível como um complemento pago. Acesse o site para ativar: ")
+          break;
+        }
 
         const { amount: newAmount, description: newDescription, category: newCategory } = interpretation.data;
 
