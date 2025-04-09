@@ -41,7 +41,9 @@ export async function interpretMessageWithAI(message) {
 
   Rules:
   - If the user does not specify a category, infer the most suitable one from the description using only the valid categories.
-  - If the user provides a category that is not in the valid list, set the intent to "add_expense_new_category" and capture the category exactly as written by the user.
+  - If the user provides a category:
+    • If it is in the valid category list, set the intent to "add_expense"
+    • If it is not in the valid category list, set the intent to "add_expense_new_category"
       
         - For "add_expense_new_category", all categories are valid, including user-defined ones.
     When the intent is "delete_expense", extract the messageId: A short ID containing letters and numbers
