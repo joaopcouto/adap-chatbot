@@ -1,5 +1,6 @@
 import express from "express";
 import twilio from "twilio";
+import { devLog } from "../helpers/logger.js";
 
 import { interpretMessageWithAI } from "../services/aiService.js";
 import {
@@ -27,6 +28,7 @@ import {
   sendTotalExpensesLastMonthsMessage,
 } from "../helpers/messages.js";
 import { VALID_CATEGORIES } from "../utils/constants.js";
+import { hasAcessToFeature } from "../helpers/userUtils.js";
 
 const router = express.Router();
 
@@ -39,11 +41,15 @@ router.post("/", async (req, res) => {
 
   try {
     const interpretation = await interpretMessageWithAI(userMessage);
-
+    
     switch (interpretation.intent) {
       case "add_expense":
         const { amount, description, category } = interpretation.data;
-        if (VALID_CATEGORIES.includes(category)) {
+        devLog(amount, description, category);
+        devLog("Verificando se categoria é válida e acesso a categoria customizada...");
+        const userHasFreeCategorization = await hasAcessToFeature(userId, "add_expense_new_category");
+
+        if (VALID_CATEGORIES.includes(category) && !userHasFreeCategorization) {
           const newExpense = new Expense({
             userId,
             amount,
@@ -52,7 +58,9 @@ router.post("/", async (req, res) => {
             date: new Date(),
             messageId: generateId(),
           });
+          devLog("Salvando nova despesa:", newExpense);
           await newExpense.save();
+          devLog("Enviando mensagem de confirmação ao usuário.");
           sendExpenseAddedMessage(twiml, newExpense);
           await UserStats.findOneAndUpdate(
             { userId },
@@ -60,8 +68,96 @@ router.post("/", async (req, res) => {
             { upsert: true }
           );
         } else {
+          const regex = new RegExp(description, "i");
+
+          const similarExpense = await Expense.findOne({
+            userId,
+            description: { $regex: regex }
+          }).sort({ date: -1 });
+
+          if (userHasFreeCategorization && similarExpense?.category) {
+            const inferredCategory = similarExpense.category;
+
+            const newExpense = new Expense({
+              userId,
+              amount,
+              description,
+              category: inferredCategory,
+              date: new Date(),
+              messageId: generateId(),
+            });
+            devLog("Salvando nova despesa:", newExpense);
+            await newExpense.save();
+            devLog("Enviando mensagem de confirmação ao usuário.");
+            sendExpenseAddedMessage(twiml, newExpense);
+            await UserStats.findOneAndUpdate(
+              { userId },
+              { $inc: { totalSpent: amount } },
+              { upsert: true }
+            );
+          } else {
+            const fallbackCategory = VALID_CATEGORIES.includes(category) ? category : "outro";
+
+            const newExpense = new Expense({
+              userId,
+              amount,
+              description,
+              category: fallbackCategory,
+              date: new Date(),
+              messageId: generateId(),
+            });
+            devLog("Salvando nova despesa:", newExpense);
+            await newExpense.save();
+            devLog("Enviando mensagem de confirmação ao usuário.");
+            sendExpenseAddedMessage(twiml, newExpense);
+            await UserStats.findOneAndUpdate(
+              { userId },
+              { $inc: { totalSpent: amount } },
+              { upsert: true }
+            );
+          }
+        }
+
+        
+        break;
+
+      case "add_expense_new_category":
+        if (!(await hasAcessToFeature(userId, "add_expense_new_category"))) {
+          twiml.message("🚫 Este recurso está disponível como um complemento pago. Acesse o site para ativar: ")
+          break;
+        }
+
+        const { amount: newAmount, description: newDescription, category: newCategory } = interpretation.data;
+
+        //Adiciona a nova categoria ao banco
+        if (!VALID_CATEGORIES.includes(newCategory)) {
+          const userStats = await UserStats.findOneAndUpdate(
+            { userId },
+            { $addToSet: { createdCategories: newCategory} }, 
+            { new: true, upsert: true } 
+          );
+
+          const newExpense = new Expense({
+            userId,
+            amount: newAmount,
+            description: newDescription,
+            category: newCategory,
+            date: new Date(),
+            messageId: generateId(),
+          });
+          devLog("Salvando nova despesa:", newExpense);
+          await newExpense.save();
+          devLog("Enviando mensagem de confirmação ao usuário.");
+          sendExpenseAddedMessage(twiml, newExpense);
+          await UserStats.findOneAndUpdate(
+            { userId },
+            { $inc: { totalSpent: newAmount } },
+            { upsert: true }
+          );
+        } else {
           sendHelpMessage(twiml);
         }
+
         break;
 
       case "delete_expense":
@@ -71,21 +167,29 @@ router.post("/", async (req, res) => {
           const expense = await Expense.findOneAndDelete({ userId, messageId });
 
           if (expense) {
+            const isCustomCategory = !VALID_CATEGORIES.includes(expense.category);
+
+            if (isCustomCategory) {
+              const count = await Expense.countDocuments({ userId, category: expense.category });
+              if (count === 0) {
+                await UserStats.findOneAndUpdate(
+                  { userId },
+                  { $pull: { createdCategories: expense.category } }
+                );
+              }
+            }
+
             sendExpenseDeletedMessage(twiml, expense);
             await UserStats.findOneAndUpdate(
               { userId },
               { $inc: { totalSpent: -expense.amount } }
             );
           } else {
-            twiml.message(
-              `🚫 Nenhum gasto encontrado com o ID #_${messageId}_ para exclusão.`
-            );
+            twiml.message(`🚫 Nenhum gasto encontrado com o ID #_${messageId}_ para exclusão.`);
           }
         } catch (error) {
-          console.error("Erro ao excluir despesa pelo messageId:", error);
-          twiml.message(
-            "🚫 Ocorreu um erro ao tentar excluir a despesa. Tente novamente."
-          );
+          devLog("Erro ao excluir despesa pelo messageId:", error);
+          twiml.message("🚫 Ocorreu um erro ao tentar excluir a despesa. Tente novamente.");
         }
         break;
 
@@ -103,7 +207,7 @@ router.post("/", async (req, res) => {
             await sendReportImage(userId, imageUrl);
           }
         } catch (error) {
-          console.error("Erro ao gerar gráfico:", error);
+          devLog("Erro ao gerar gráfico:", error);
           twiml.message(
             "❌ Ocorreu um erro ao gerar o relatório. Tente novamente."
           );
@@ -127,7 +231,7 @@ router.post("/", async (req, res) => {
             await sendReportImage(userId, imageFilename);
           }
         } catch (error) {
-          console.error("Erro ao gerar gráfico por categorias:", error);
+          devLog("Erro ao gerar gráfico por categorias:", error);
           twiml.message(
             "❌ Ocorreu um erro ao gerar o relatório por categorias. Tente novamente."
           );
@@ -186,6 +290,10 @@ router.post("/", async (req, res) => {
         break;
 
       case "financial_help":
+        if (!(await hasAcessToFeature(userId, "financial_help"))) {
+          twiml.message("🚫 Este recurso está disponível como um complemento pago. Acesse o site para ativar.");
+          break;
+        }
         await sendFinancialHelpMessage(twiml, userMessage);
         break;
 
@@ -194,10 +302,11 @@ router.post("/", async (req, res) => {
         break;
     }
   } catch (err) {
-    console.error("Erro ao interpretar a mensagem:", err);
+    devLog("Erro ao interpretar a mensagem:", err);
     sendHelpMessage(twiml);
   }
 
+  devLog("Resposta final do Twilio:", twiml.toString());
   res.writeHead(200, { "Content-Type": "text/xml" });
   res.end(twiml.toString());
 });

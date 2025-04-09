@@ -12,10 +12,11 @@ export async function interpretMessageWithAI(message) {
   1. Identify the Intent:
      Determine the user's intent based on their message. Possible intents include:
       "add_expense" → The user wants to log an expense. Extract the amount, description, and category.
+      "add_expense_new_category" → The user wants to log an expense with a new category. Extract the amount, description, and category.
       "delete_expense" → The user wants to delete an expense. Extract the messageId.
       "generate_daily_chart" → The user wants to generate a daily expense chart. Extract the amount of days.  
       "generate_category_chart" → The user wants to generate a category-wise expense chart. Extract the days.
-      "get_total" → The user wants to retrieve the total amount spent. Extract the category if provided.
+      "get_total" → The user wants to retrieve the total amount spent in a specific category. Extract the category, which can be any of the valid categories or user-defined ones, in case of user-defined categories, extract exactly as the user wrote it.
       "get_total_all" → The user wants to retrieve the total amount spent across all categories.
       "get_total_last_months" → The user wants to retrieve the total amount spent in the last months. Extract the month in two formats: "YYYY-MM" and "January 2025". If the user specify the past month, the assistant should return the total amount spent in that month.
       "greeting" → The user sends a greeting (e.g., "Oi", "Olá").
@@ -23,23 +24,33 @@ export async function interpretMessageWithAI(message) {
       "financial_help" → The user asks a general finance-related question (e.g., investments, savings, strategies).
       "unknown" → The message does not match any of the above intents.
   
-  2. Extract Relevant Data:
-     When the intent is "add_expense", extract the following:
-     - Amount: A positive numerical value representing the expense amount.
-     - Description: A short but meaningful description of the expense.
-     - Category: Assign the correct category based on the description if the user does not specify it. The valid categories are:
-        "gastos fixos" (fixed expenses like rent, electricity, internet)
-        "lazer" (entertainment and leisure activities such as dining out, theater)
-        "investimento" (investments such as stocks, crypto, real estate)
-        "conhecimento" (education-related spending, courses, books)
-        "doação" (donations and charitable contributions)
-        "outro" (anything that does not fit into the above categories)
-        always try to fit the expense into one of the categories.
+  2. Extract Relevant Data for "add_expense":
+
+  When the intent is "add_expense", extract the following information:
+
+  - Amount: A positive numerical value representing the expense amount.
+  - Description: A short and meaningful description of the expense.
+  - Category: If the user does not explicitly mention a category, determine the most appropriate one based on the description using only the valid categories listed below.
+
+  Valid categories for the "add_expense" intent:
+    - "gastos fixos" – fixed expenses (e.g., rent, electricity, internet)
+    - "lazer" – entertainment and leisure activities (e.g., dining out, cinema)
+    - "investimento" – investments (e.g., stocks, crypto, real estate)
+    - "conhecimento" – education-related expenses (e.g., courses, books)
+    - "doação" – donations
+
+  Rules:
+  - If the user does not specify a category, infer the most suitable one from the description using only the valid categories.
+  - If the user provides a category that is not in the valid list, set the intent to "add_expense_new_category" and capture the category exactly as written by the user.
+      
+        - For "add_expense_new_category", all categories are valid, including user-defined ones.
     When the intent is "delete_expense", extract the messageId: A short ID containing letters and numbers
 
   3. Validation & Categorization Rules:
-    - If the category is not specified, determine it based on the description.
-    - If the category is invalid or unclear, default to "outro".
+    - If the category is not specified, determine it based on the description using the valid categories.
+    - If the user provides a category that does **not match** any of the valid categories ("gastos fixos", "lazer", "investimento", "conhecimento", "doação"), then the intent must be "add_expense_new_category", and the category must be extracted **exactly as the user wrote it**.
+    - If categorization is unclear or the user has access to "add_expense_new_category" (user-defined categories), and there is a past expense with the same description, reuse the last known category used for that description.
+    - For the "get_total" intent, the category must be specified, and could be any category, including user-defined ones.
     - Ensure the amount is a valid positive number; otherwise, discard or request clarification.
     - The assistant must read requests in Brazilian Portuguese and respond in Brazilian Portuguese.
   
@@ -47,7 +58,7 @@ export async function interpretMessageWithAI(message) {
        Respond only with a valid JSON object without any additional formatting or explanation
      - Return a JSON object with the intent and extracted data. Use this format:
        {
-         "intent": "add_expense" | "delete_expense" | "generate_daily_chart" | "generate_category_chart" | "get_total" | "get_total_all" | "get_total_last_months" | "greeting" | "instructions" | "financial_help",
+         "intent": "add_expense" | "add_expense_new_category" | "delete_expense" | "generate_daily_chart" | "generate_category_chart" | "get_total" | "get_total_all" | "get_total_last_months" | "greeting" | "instructions" | "financial_help",
          "data": {
            "amount": number,
            "description": string,
@@ -60,8 +71,15 @@ export async function interpretMessageWithAI(message) {
        }
   
   5. Examples of User Inputs & Correct Outputs:
+     - User: "12 lanche" 
+       Response: { intent: "add_expense", data: { amount: 12, description: "lanche", category: determine it based on the description using the valid categories } }
+      - User: "15 uber" → { intent: "add_expense", data: { amount: 15, description: "uber", category: determine it based on the  description using the valid categories  } }
+     - User: "25 comida em alimentação" → { intent: "add_expense_new_category", data: { amount: 25, description: "comida", category: "alimentação" } }
+
      - User: "Gastei 50 com filmes em lazer"
        Response: { "intent": "add_expense", "data": { "amount": 50, "description": "filmes", "category": "lazer" } }
+     - User: "Gastei 20 com uber em transporte"
+       Response: { "intent": "add_expense_new_category", "data": { "amount": 20, "description": "uber", "category": "transporte" } }
      - User: "Remover gasto #4cdc9"
        Response: { "intent": "delete_expense", "data": { messageId: 4cdc9 } }
      - User: "QUAIS foram meus gastos nos últimos 10 dias?"
@@ -70,6 +88,8 @@ export async function interpretMessageWithAI(message) {
        Response: { "intent": "generate_category_chart", "data": { "days": 7}}
      - User: "Qual é o meu gasto total em gastos fixos?"
        Response: { "intent": "get_total", "data": { "category": "gastos fixos" } }
+     - User: "Qual é o meu gasto total em transporte?"
+       Response: { "intent": "get_total", "data": { "category": "transporte" } } 
      - User: "Qual é o meu gasto total?"
        Response: { "intent": "get_total_all", "data": {} }
      - User: "Quanto gastei no mês de fevereiro?" 
@@ -82,8 +102,8 @@ export async function interpretMessageWithAI(message) {
        Response: { "intent": "financial_help", "data": {} }
   
 
-  Now, interpret this message: "${message}"`; 
-  
+  Now, interpret this message: "${message}"`;
+
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [{ role: "user", content: prompt }],
