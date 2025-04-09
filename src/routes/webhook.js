@@ -44,7 +44,7 @@ router.post("/", async (req, res) => {
     switch (interpretation.intent) {
       case "add_expense":
         const { amount, description, category } = interpretation.data;
-
+        console.log(amount, description, category);
         const userHasFreeCategorization = await hasAcessToFeature(userId, "add_expense_new_category");
 
         if (VALID_CATEGORIES.includes(category) && !userHasFreeCategorization) {

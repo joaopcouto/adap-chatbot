@@ -24,19 +24,27 @@ export async function interpretMessageWithAI(message) {
       "financial_help" → The user asks a general finance-related question (e.g., investments, savings, strategies).
       "unknown" → The message does not match any of the above intents.
   
-  2. Extract Relevant Data:
-     When the intent is "add_expense", extract the following:
-     - Amount: A positive numerical value representing the expense amount.
-     - Description: A short but meaningful description of the expense.
-     - Category: Assign the correct category based on the description if the user does not specify it. The valid categories for "add_expense" are:
-        "gastos fixos" (fixed expenses like rent, electricity, internet)
-        "lazer" (entertainment and leisure activities such as dining out, theater)
-        "investimento" (investments such as stocks, crypto, real estate)
-        "conhecimento" (education-related spending, courses, books)
-        "doação" (donations and charitable contributions)
-        "outro" (anything that does not fit into the above categories)
-        Always try to fit into one of the valid categories only **if the user did not specify one**. If the user specifies a category outside the valid list, treat it as user-defined and use the intent "add_expense_new_category".
-      - For "add_expense_new_category", all categories are valid, including user-defined ones.
+  2. Extract Relevant Data for "add_expense":
+
+When the intent is "add_expense", extract the following information:
+
+- Amount: A positive numerical value representing the expense amount.
+- Description: A short but meaningful description of the expense.
+- Category: Identify the correct category based on the description if the user does not explicitly provide one.
+
+Valid categories for the "add_expense" intent are:
+  - "gastos fixos" – fixed expenses (e.g., rent, electricity, internet)
+  - "lazer" – entertainment and leisure activities (e.g., dining out, theater)
+  - "investimento" – investments (e.g., stocks, crypto, real estate)
+  - "conhecimento" – education-related spending (e.g., courses, books)
+  - "doação" – donations and charitable contributions
+  - "outro" – expenses that do not fit into any of the categories above
+
+Rules:
+- If the user does not specify a category, infer the most suitable one from the context.
+- If the user provides a category that is not in the valid list, treat it as a custom category and set the intent to "add_expense_new_category" instead of "add_expense".
+      
+        - For "add_expense_new_category", all categories are valid, including user-defined ones.
     When the intent is "delete_expense", extract the messageId: A short ID containing letters and numbers
 
   3. Validation & Categorization Rules:
