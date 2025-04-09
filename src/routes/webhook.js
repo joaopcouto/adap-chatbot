@@ -1,5 +1,6 @@
 import express from "express";
 import twilio from "twilio";
+import { devLog } from "../helpers/logger.js";
 
 import { interpretMessageWithAI } from "../services/aiService.js";
 import {
@@ -44,7 +45,8 @@ router.post("/", async (req, res) => {
     switch (interpretation.intent) {
       case "add_expense":
         const { amount, description, category } = interpretation.data;
-        console.log(amount, description, category);
+        devLog(amount, description, category);
+        devLog("Verificando se categoria é válida e acesso a categoria customizada...");
         const userHasFreeCategorization = await hasAcessToFeature(userId, "add_expense_new_category");
 
         if (VALID_CATEGORIES.includes(category) && !userHasFreeCategorization) {
@@ -56,7 +58,9 @@ router.post("/", async (req, res) => {
             date: new Date(),
             messageId: generateId(),
           });
+          devLog("Salvando nova despesa:", newExpense);
           await newExpense.save();
+          devLog("Enviando mensagem de confirmação ao usuário.");
           sendExpenseAddedMessage(twiml, newExpense);
           await UserStats.findOneAndUpdate(
             { userId },
@@ -82,7 +86,9 @@ router.post("/", async (req, res) => {
               date: new Date(),
               messageId: generateId(),
             });
+            devLog("Salvando nova despesa:", newExpense);
             await newExpense.save();
+            devLog("Enviando mensagem de confirmação ao usuário.");
             sendExpenseAddedMessage(twiml, newExpense);
             await UserStats.findOneAndUpdate(
               { userId },
@@ -100,7 +106,9 @@ router.post("/", async (req, res) => {
               date: new Date(),
               messageId: generateId(),
             });
+            devLog("Salvando nova despesa:", newExpense);
             await newExpense.save();
+            devLog("Enviando mensagem de confirmação ao usuário.");
             sendExpenseAddedMessage(twiml, newExpense);
             await UserStats.findOneAndUpdate(
               { userId },
@@ -137,7 +145,9 @@ router.post("/", async (req, res) => {
             date: new Date(),
             messageId: generateId(),
           });
+          devLog("Salvando nova despesa:", newExpense);
           await newExpense.save();
+          devLog("Enviando mensagem de confirmação ao usuário.");
           sendExpenseAddedMessage(twiml, newExpense);
           await UserStats.findOneAndUpdate(
             { userId },
@@ -178,7 +188,7 @@ router.post("/", async (req, res) => {
             twiml.message(`🚫 Nenhum gasto encontrado com o ID #_${messageId}_ para exclusão.`);
           }
         } catch (error) {
-          console.error("Erro ao excluir despesa pelo messageId:", error);
+          devLog("Erro ao excluir despesa pelo messageId:", error);
           twiml.message("🚫 Ocorreu um erro ao tentar excluir a despesa. Tente novamente.");
         }
         break;
@@ -197,7 +207,7 @@ router.post("/", async (req, res) => {
             await sendReportImage(userId, imageUrl);
           }
         } catch (error) {
-          console.error("Erro ao gerar gráfico:", error);
+          devLog("Erro ao gerar gráfico:", error);
           twiml.message(
             "❌ Ocorreu um erro ao gerar o relatório. Tente novamente."
           );
@@ -221,7 +231,7 @@ router.post("/", async (req, res) => {
             await sendReportImage(userId, imageFilename);
           }
         } catch (error) {
-          console.error("Erro ao gerar gráfico por categorias:", error);
+          devLog("Erro ao gerar gráfico por categorias:", error);
           twiml.message(
             "❌ Ocorreu um erro ao gerar o relatório por categorias. Tente novamente."
           );
@@ -292,10 +302,11 @@ router.post("/", async (req, res) => {
         break;
     }
   } catch (err) {
-    console.error("Erro ao interpretar a mensagem:", err);
+    devLog("Erro ao interpretar a mensagem:", err);
     sendHelpMessage(twiml);
   }
 
+  devLog("Resposta final do Twilio:", twiml.toString());
   res.writeHead(200, { "Content-Type": "text/xml" });
   res.end(twiml.toString());
 });

@@ -26,33 +26,31 @@ export async function interpretMessageWithAI(message) {
   
   2. Extract Relevant Data for "add_expense":
 
-When the intent is "add_expense", extract the following information:
+  When the intent is "add_expense", extract the following information:
 
-- Amount: A positive numerical value representing the expense amount.
-- Description: A short but meaningful description of the expense.
-- Category: Identify the correct category based on the description if the user does not explicitly provide one.
+  - Amount: A positive numerical value representing the expense amount.
+  - Description: A short and meaningful description of the expense.
+  - Category: If the user does not explicitly mention a category, determine the most appropriate one based on the description using only the valid categories listed below.
 
-Valid categories for the "add_expense" intent are:
-  - "gastos fixos" – fixed expenses (e.g., rent, electricity, internet)
-  - "lazer" – entertainment and leisure activities (e.g., dining out, theater)
-  - "investimento" – investments (e.g., stocks, crypto, real estate)
-  - "conhecimento" – education-related spending (e.g., courses, books)
-  - "doação" – donations and charitable contributions
-  - "outro" – expenses that do not fit into any of the categories above
+  Valid categories for the "add_expense" intent:
+    - "gastos fixos" – fixed expenses (e.g., rent, electricity, internet)
+    - "lazer" – entertainment and leisure activities (e.g., dining out, cinema)
+    - "investimento" – investments (e.g., stocks, crypto, real estate)
+    - "conhecimento" – education-related expenses (e.g., courses, books)
+    - "doação" – donations
 
-Rules:
-- If the user does not specify a category, infer the most suitable one from the context.
-- If the user provides a category that is not in the valid list, treat it as a custom category and set the intent to "add_expense_new_category" instead of "add_expense".
+  Rules:
+  - If the user does not specify a category, infer the most suitable one from the description using only the valid categories.
+  - If the user provides a category that is not in the valid list, set the intent to "add_expense_new_category" and capture the category exactly as written by the user.
       
         - For "add_expense_new_category", all categories are valid, including user-defined ones.
     When the intent is "delete_expense", extract the messageId: A short ID containing letters and numbers
 
   3. Validation & Categorization Rules:
     - If the category is not specified, determine it based on the description using the valid categories.
-    - If the user provides a category that does **not match** any of the valid categories ("gastos fixos", "lazer", "investimento", "conhecimento", "doação", "outro"), then the intent must be "add_expense_new_category", and the category must be extracted **exactly as the user wrote it**.
+    - If the user provides a category that does **not match** any of the valid categories ("gastos fixos", "lazer", "investimento", "conhecimento", "doação"), then the intent must be "add_expense_new_category", and the category must be extracted **exactly as the user wrote it**.
     - If categorization is unclear or the user has access to "add_expense_new_category" (user-defined categories), and there is a past expense with the same description, reuse the last known category used for that description.
     - For the "get_total" intent, the category must be specified, and could be any category, including user-defined ones.
-    - If the category is unclear, default to "outro".
     - Ensure the amount is a valid positive number; otherwise, discard or request clarification.
     - The assistant must read requests in Brazilian Portuguese and respond in Brazilian Portuguese.
   
@@ -73,6 +71,11 @@ Rules:
        }
   
   5. Examples of User Inputs & Correct Outputs:
+     - User: "12 lanche" 
+       Response: { intent: "add_expense", data: { amount: 12, description: "lanche", category: determine it based on the description using the valid categories } }
+      - User: "15 uber" → { intent: "add_expense", data: { amount: 15, description: "uber", category: determine it based on the  description using the valid categories  } }
+     - User: "25 comida em alimentação" → { intent: "add_expense_new_category", data: { amount: 25, description: "comida", category: "alimentação" } }
+
      - User: "Gastei 50 com filmes em lazer"
        Response: { "intent": "add_expense", "data": { "amount": 50, "description": "filmes", "category": "lazer" } }
      - User: "Gastei 20 com uber em transporte"
@@ -99,8 +102,8 @@ Rules:
        Response: { "intent": "financial_help", "data": {} }
   
 
-  Now, interpret this message: "${message}"`; 
-  
+  Now, interpret this message: "${message}"`;
+
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [{ role: "user", content: prompt }],
