@@ -123,7 +123,7 @@ router.post("/", async (req, res) => {
 
       case "add_expense_new_category":
         if (!(await hasAcessToFeature(userId, "add_expense_new_category"))) {
-          twiml.message("🚫 Este recurso está disponível como um complemento pago. Acesse o site para ativar: ")
+          twiml.message("🚫 Este recurso está disponível como um complemento pago.\n\n🤖Para você poder criar novas categorias personalizadas. \n\nComo, categoria \"Transporte\" para anotar o seu uber, gasolina ou \"fast-food\" para saber exatamente quanto dinheiro está indo para aquele lanche que você disse que merece...\n\nOu até mesmo a categoria \"Filho\" para saber quanto está indo para os gastos do seu filho. \n\n📌Acesse o link para testar agora mesmo: https://pay.hotmart.com/O99171246D\n\nCaso não queira criar uma categoria personalizada, você tem a opção de escolher uma das 5 categorias grátis:\n\n-gastos fixos\n-lazer\n-investimento\n-conhecimento\n-doação\n-outro\n\nE para utilizar é simples:\n\n(Valor) (onde) em (categoria)\n\nExemplo:\n\n25 mercado em gastos fixos")
           break;
         }
 
