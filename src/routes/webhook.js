@@ -5,6 +5,7 @@ import { devLog } from "../helpers/logger.js";
 import { interpretMessageWithAI } from "../services/aiService.js";
 import {
   calculateTotalExpenses,
+  getCurrentTotalIncome,
   getExpensesReport,
   getCategoryReport,
   getCurrentTotalSpent
@@ -15,13 +16,17 @@ import {
 } from "../services/chartService.js";
 import { sendReportImage } from "../services/twilioService.js";
 import Expense from "../models/Expense.js";
+import Income from "../models/Income.js";
 import UserStats from "../models/UserStats.js";
 import { customAlphabet } from "nanoid";
 import {
   sendGreetingMessage,
   sendHelpMessage,
+  sendIncomeAddedMessage,
   sendExpenseAddedMessage,
+  sendIncomeDeletedMessage,
   sendExpenseDeletedMessage,
+  sendTotalIncomeMessage,
   sendTotalExpensesMessage,
   sendTotalExpensesAllMessage,
   sendFinancialHelpMessage,
@@ -41,10 +46,39 @@ router.post("/", async (req, res) => {
 
   try {
     const interpretation = await interpretMessageWithAI(userMessage);
+    const { amount, description, category } = interpretation.data;
+    const { messageId } = interpretation.data;
+
     
     switch (interpretation.intent) {
+      
+      case "add_income":
+        devLog(amount, description);
+        const newIncome = new Income({
+          userId,
+          amount, 
+          description,
+          date: new Date(),
+          messageId: generateId(),
+        });
+        devLog("Salvando nova receita:", newIncome);
+
+
+        await newIncome.save();
+
+        await UserStats.findOneAndUpdate(
+          { userId },
+          { $inc: { totalIncome: amount } },
+          { upsert: true }
+        );
+
+        sendIncomeAddedMessage(twiml, newIncome);
+
+
+      break;
+
       case "add_expense":
-        const { amount, description, category } = interpretation.data;
+        // const { amount, description, category } = interpretation.data;
         devLog(amount, description, category);
         devLog("Verificando se categoria é válida e acesso a categoria customizada...");
         const userHasFreeCategorization = await hasAcessToFeature(userId, "add_expense_new_category");
@@ -160,10 +194,25 @@ router.post("/", async (req, res) => {
 
         break;
 
-      case "delete_expense":
-        const { messageId } = interpretation.data;
+      case "delete_transaction":
 
         try {
+          const isIncome = await Income.findOne({ userId, messageId });
+
+          if(isIncome) {
+            const income = await Income.findOneAndDelete({ userId, messageId });
+
+            if (income) {
+              await UserStats.findOneAndUpdate(
+                { userId },
+                { $inc: {totalSpent: -income.amount}}
+              );
+            };
+
+            sendIncomeDeletedMessage(twiml, income);
+            break;
+          }
+
           const expense = await Expense.findOneAndDelete({ userId, messageId });
 
           if (expense) {
@@ -244,6 +293,11 @@ router.post("/", async (req, res) => {
           interpretation.data.category
         );
         sendTotalExpensesMessage(twiml, total, interpretation.data.category);
+        break;
+
+        case "get_total_income":
+        const totalIncome = await getCurrentTotalIncome(userId);
+        sendTotalIncomeMessage(twiml, totalIncome);
         break;
 
       case "get_total_all":

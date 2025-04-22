@@ -5,10 +5,17 @@ const monthlySpendingSchema = new mongoose.Schema({
     amount: Number
 }, { _id: false});
 
+const monthlyIncomeSchema = new mongoose.Schema({
+    month: String,
+    amount: Number
+}, { _id: false});
+
 const userStatsSchema = new mongoose.Schema({
     userId: { type: String, required: true, unique: true },
     totalSpent: { type: Number, default: 0 },
+    totalIncome: { type: Number, default: 0 },
     spendingHistory: { type: [monthlySpendingSchema], default: [] },
+    incomeHistory: { type: [monthlyIncomeSchema], default: [] },
     featuresUnlocked: {
         type: [String],
         default: [],

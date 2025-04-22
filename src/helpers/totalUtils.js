@@ -1,5 +1,16 @@
 import Expense from "../models/Expense.js";
+import Income from "../models/Income.js";
 import UserStats from "../models/UserStats.js";
+
+export async function getCurrentTotalIncome(userId) {
+  try {
+    const userStats = await UserStats.findOne({ userId });
+    return userStats?.totalIncome || 0;
+  } catch (err) {
+    console.error("Erro ao buscar totalIncome:", err);
+    return 0;
+  }
+}
 
 export async function calculateTotalExpenses(userId, category = null) {   
   const filter = category
