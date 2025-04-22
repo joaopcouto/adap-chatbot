@@ -205,7 +205,7 @@ router.post("/", async (req, res) => {
             if (income) {
               await UserStats.findOneAndUpdate(
                 { userId },
-                { $inc: {totalSpent: -income.amount}}
+                { $inc: {totalIncome: -income.amount}}
               );
             };
 
