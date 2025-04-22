@@ -11,7 +11,7 @@ export async function updateMonthlySpending() {
 
         const updates = userStatsList.map(async (user) => {
             
-            console.log(`Usuário ${user._id} - totalSpent: ${user.totalSpent}`);
+            console.log(`Usuário ${user._id} - totalSpent: ${user.totalSpent} totalIncome: ${user.totalIncome}`);
             user.spendingHistory.push({
                 month: currentMonth,
                 amount: user.totalSpent
@@ -23,6 +23,17 @@ export async function updateMonthlySpending() {
 
             user.totalSpent = 0;
 
+            user.incomeHistory.push({
+                month: currentMonth,
+                amount: user.totalIncome
+            });
+
+            if (user.incomeHistory.length > 3) {
+                user.incomeHistory = user.incomeHistory.slice(-3);
+            }
+
+            user.totalIncome = 0;
+
             return user.save();
         });
         await Promise.all(updates);
@@ -32,7 +43,7 @@ export async function updateMonthlySpending() {
     }
 }
 
-const dbName = "prod";
+const dbName = "test";
 
 mongoose.connect("mongodb+srv://joaopc:jp2209@cluster0.x9s5k.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0", {
     dbName,

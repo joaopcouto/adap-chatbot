@@ -13,9 +13,10 @@ export async function interpretMessageWithAI(message) {
      Determine the user's intent based on their message. Possible intents include:
       "add_expense" → The user wants to log an expense. Extract the amount, description, and category.
       "add_expense_new_category" → The user wants to log an expense with a new category. Extract the amount, description, and category.
-      "delete_expense" → The user wants to delete an expense. Extract the messageId.
+      "delete_transaction" → The user wants to delete an expense. Extract the messageId.
       "generate_daily_chart" → The user wants to generate a daily expense chart. Extract the amount of days.  
       "generate_category_chart" → The user wants to generate a category-wise expense chart. Extract the days.
+      "get_total_income" → The user wants to retrieve the total amout income.
       "get_total" → The user wants to retrieve the total amount spent in a specific category. Extract the category, which can be any of the valid categories or user-defined ones, in case of user-defined categories, extract exactly as the user wrote it.
       "get_total_all" → The user wants to retrieve the total amount spent across all categories.
       "get_total_last_months" → The user wants to retrieve the total amount spent in the last months. Extract the month in two formats: "YYYY-MM" and "January 2025". If the user specify the past month, the assistant should return the total amount spent in that month.
@@ -45,8 +46,8 @@ export async function interpretMessageWithAI(message) {
     • If it is in the valid category list, set the intent to "add_expense"
     • If it is not in the valid category list, set the intent to "add_expense_new_category"
       
-        - For "add_expense_new_category", all categories are valid, including user-defined ones.
-    When the intent is "delete_expense", extract the messageId: A short ID containing letters and numbers
+  - For "add_expense_new_category", all categories are valid, including user-defined ones.
+  - When the intent is "delete_transaction", extract the messageId: A short ID containing letters and numbers
 
   3. Validation & Categorization Rules:
     - If the category is not specified, determine it based on the description using the valid categories.
@@ -60,7 +61,7 @@ export async function interpretMessageWithAI(message) {
        Respond only with a valid JSON object without any additional formatting or explanation
      - Return a JSON object with the intent and extracted data. Use this format:
        {
-         "intent": "add_expense" | "add_expense_new_category" | "delete_expense" | "generate_daily_chart" | "generate_category_chart" | "get_total" | "get_total_all" | "get_total_last_months" | "greeting" | "instructions" | "financial_help",
+         "intent": "add_income" | "add_expense" | "add_expense_new_category" | "delete_transaction" | "generate_daily_chart" | "generate_category_chart" | "get_total_income" |"get_total" | "get_total_all" | "get_total_last_months" | "greeting" | "instructions" | "financial_help",
          "data": {
            "amount": number,
            "description": string,
@@ -73,26 +74,29 @@ export async function interpretMessageWithAI(message) {
        }
   
   5. Examples of User Inputs & Correct Outputs:
+     - User: "Recebi 1000 reais de salário"
+       Response: { "intent": "add_income", "data": { "amount": 1000, "description": "salário" } }
      - User: "12 lanche" 
        Response: { intent: "add_expense", data: { amount: 12, description: "lanche", category: determine it based on the description using the valid categories } }
       - User: "15 uber" → { intent: "add_expense", data: { amount: 15, description: "uber", category: determine it based on the  description using the valid categories  } }
      - User: "25 comida em alimentação" → { intent: "add_expense_new_category", data: { amount: 25, description: "comida", category: "alimentação" } }
-
      - User: "Gastei 50 com filmes em lazer"
        Response: { "intent": "add_expense", "data": { "amount": 50, "description": "filmes", "category": "lazer" } }
      - User: "Gastei 20 com uber em transporte"
        Response: { "intent": "add_expense_new_category", "data": { "amount": 20, "description": "uber", "category": "transporte" } }
      - User: "Remover gasto #4cdc9"
-       Response: { "intent": "delete_expense", "data": { messageId: 4cdc9 } }
+       Response: { "intent": "delete_transaction", "data": { messageId: 4cdc9 } }
      - User: "QUAIS foram meus gastos nos últimos 10 dias?"
        Response: { "intent": "generate_daily_chart", "data": { "days": 10}}
      - User: "ONDE foram meus gastos nos últimos 7 dias?"
        Response: { "intent": "generate_category_chart", "data": { "days": 7}}
      - User: "Qual é o meu gasto total em gastos fixos?"
        Response: { "intent": "get_total", "data": { "category": "gastos fixos" } }
+     - User: "Qual é minha receita total?"
+       Response: { "intent": "get_total_income", "data": {}}
      - User: "Qual é o meu gasto total em transporte?"
        Response: { "intent": "get_total", "data": { "category": "transporte" } } 
-     - User: "Qual é o meu gasto total?"
+     - User: "Gasto total"
        Response: { "intent": "get_total_all", "data": {} }
      - User: "Quanto gastei no mês de fevereiro?" 
        Response: { "intent": "get_total_last_months", "data": { "month": "2025-02", "monthName": "Fevereiro" }}
