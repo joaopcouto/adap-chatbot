@@ -6,3 +6,7 @@ export const VALID_CATEGORIES = [
     "doação",
   ];  
 
+export const VALID_CATEGORIES_INCOME = [
+  "Salário",
+  "Renda extra"
+]

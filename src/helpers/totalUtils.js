@@ -12,15 +12,24 @@ export async function getCurrentTotalIncome(userId) {
   }
 }
 
-export async function calculateTotalExpenses(userId, category = null) {   
+export async function calculateTotalExpenses(userId, category = null, type) {
   const filter = category
-  ? { userId, category: { $regex: new RegExp(`^${category.trim()}$`, "i") } } 
-  : { userId };
-  const result = await Expense.aggregate([  
-    { $match: filter },
-    { $group: { _id: null, total: { $sum: "$amount" } } }, 
-  ]);
-  return result.length ? result[0].total : 0; 
+    ? { userId, category: { $regex: new RegExp(`^${category.trim()}$`, "i") } }
+    : { userId };
+
+  if (type === "income") {
+    const result = await Income.aggregate([
+      { $match: filter },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]);
+    return result.length ? result[0].total : 0;
+  } else {
+    const result = await Expense.aggregate([
+      { $match: filter },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]);
+    return result.length ? result[0].total : 0;
+  }
 }
 
 export async function getCurrentTotalSpent(userId) {

@@ -70,8 +70,10 @@ Lá tem dicas diárias pra você gastar melhor e fazer seu dinheiro render mais!
 
 export function sendIncomeAddedMessage(twiml, incomeData) {
   twiml.message(
-    `📝 *Receita adicionada*\n📌 ${incomeData.description.toUpperCase()} 
-💰 *R$ ${incomeData.amount.toFixed(
+    `📝 *Receita adicionada*\n📌 ${incomeData.description.toUpperCase()} (_${
+      incomeData.category.charAt(0).toUpperCase() +
+      incomeData.category.slice(1)
+    }_)\n💰 *R$ ${incomeData.amount.toFixed(
       2
     )}*\n\n📅 ${incomeData.date.toLocaleDateString("pt-BR")} - #${
       incomeData.messageId
@@ -100,11 +102,12 @@ export function sendExpenseDeletedMessage(twiml, expenseData) {
   twiml.message(`🗑️ Gasto #_${expenseData.messageId}_ removido.`);
 }
 
-export function sendTotalExpensesMessage(twiml, total, category) {
+export function sendTotalExpensesMessage(twiml, total, category, type) {
   const categoryMessage = category
-    ? ` em _*${category.charAt(0).toUpperCase() + category.slice(1)}*_`
-    : "";
-  twiml.message(`*Gasto total*${categoryMessage}:\nR$ ${total.toFixed(2)}`);
+  ? ` em _*${category.charAt(0).toUpperCase() + category.slice(1)}*_`
+  : "";
+  const typeLabel = type === "income" ? "Receita" : "Gasto";
+  twiml.message(`*${typeLabel} total*${categoryMessage}:\nR$ ${total.toFixed(2)}`);
 }
 
 export function sendTotalIncomeMessage(twiml, total) {
