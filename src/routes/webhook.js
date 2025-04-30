@@ -45,6 +45,17 @@ router.post("/", async (req, res) => {
   const userMessage = req.body.Body;
   const userId = req.body.From;
 
+  const userStats = await UserStats.findOne(
+    { userId },
+    { blocked: 1 }
+  );
+
+  if (userStats?.blocked) {
+    twiml.message("🚫 Você está bloqueado de usar a ADAP.");
+    res.writeHead(200, {"Content-Type": "text/xml" });
+    return res.end(twiml.toString());
+  }
+
   const generateId = customAlphabet("1234567890abcdef", 5);
 
   try {
