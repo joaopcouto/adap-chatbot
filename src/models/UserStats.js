@@ -12,6 +12,7 @@ const monthlyIncomeSchema = new mongoose.Schema({
 
 const userStatsSchema = new mongoose.Schema({
     userId: { type: String, required: true, unique: true },
+    blocked: { type: Boolean, default: false },
     totalSpent: { type: Number, default: 0 },
     totalIncome: { type: Number, default: 0 },
     spendingHistory: { type: [monthlySpendingSchema], default: [] },
