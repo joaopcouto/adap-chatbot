@@ -251,28 +251,30 @@ router.post("/", async (req, res) => {
         if (!(await hasAcessToFeature(userId, "add_expense_new_category"))) {
           twiml.message(
             "🚫 Este recurso está disponível como um complemento pago.\n\n" +
-              "🤖 Com ele, você poderá criar novas categorias personalizadas!\n\n" +
-              'Por exemplo, criar a categoria "Transporte" para registrar gastos com Uber e gasolina, ou "Fast-food" para acompanhar o quanto está indo para aquele lanche que você merece... 🍔\n\n' +
-              'Você também pode criar uma categoria como "Filho" para controlar os gastos com seu pequeno! 👶\n\n' +
-              "📌 Acesse o link para testar agora mesmo: https://pay.hotmart.com/O99171246D\n\n" +
-              "Caso prefira, pode usar uma das 5 categorias grátis:\n" +
-              "- gastos fixos\n" +
-              "- lazer\n" +
-              "- investimento\n" +
-              "- conhecimento\n" +
-              "- doação\n" +
-              "✅ E agora também é possível registrar receitas!\n" +
-              'Basta adicionar "Recebi" antes do valor.\n\n' +
-              "É muito simples:\n\n" +
-              "- Para despesa:\n" +
-              "(Valor) (Onde) em (Categoria)\n" +
-              "Exemplo:\n" +
-              "25 mercado em gastos fixos\n\n" +
-              "- Para receita:\n" +
-              "Recebi (Valor) (De onde) em (Categoria)\n" +
-              "Exemplo:\n" +
-              "Recebi 1500 salário em investimento\n\n" +
-              "Assim, você terá controle total sobre entradas e saídas de dinheiro!"
+            "🤖 Com ele, você poderá criar novas categorias personalizadas!\n\n" +
+            "Por exemplo, criar a categoria \"Transporte\" para registrar gastos com Uber e gasolina, ou \"Fast-food\" para acompanhar o quanto está indo para aquele lanche que você merece... 🍔\n\n" +
+            "Você também pode criar uma categoria como \"Filho\" para controlar os gastos com seu pequeno! 👶\n\n" +
+            "📌 Acesse o link para testar agora mesmo: https://pay.kiwify.com.br/XVOV1ss\n\n" +
+            "Caso prefira, pode usar uma das 5 categorias grátis:\n" +
+            "- gastos fixos\n" +
+            "- lazer\n" +
+            "- investimento\n" +
+            "- conhecimento\n" +
+            "- doação\n" +
+            "- outro\n\n" +
+
+            "✅ E agora também é possível registrar receitas!\n" +
+            "Basta adicionar \"Recebi\" antes do valor.\n\n" +
+            "É muito simples:\n\n" +
+            "- Para despesa:\n" +
+            "(Valor) (Onde) em (Categoria)\n" +
+            "Exemplo:\n" +
+            "25 mercado em gastos fixos\n\n" +
+            "- Para receita:\n" +
+            "Recebi (Valor) (De onde) em (Categoria)\n" +
+            "Exemplo:\n" +
+            "Recebi 1500 salário em investimento\n\n" +
+            "Assim, você terá controle total sobre entradas e saídas de dinheiro!"
           );
           break;
         }
