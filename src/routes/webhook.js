@@ -9,6 +9,7 @@ import {
   getExpensesReport,
   getCategoryReport,
   getCurrentTotalSpent,
+  getTotalReminders
 } from "../helpers/totalUtils.js";
 import {
   generateChart,
@@ -30,6 +31,8 @@ import {
   sendTotalExpensesMessage,
   sendTotalExpensesAllMessage,
   sendFinancialHelpMessage,
+  sendReminderMessage,
+  sendTotalRemindersMessage,
   sendTotalExpensesLastMonthsMessage,
 } from "../helpers/messages.js";
 import {
@@ -37,6 +40,7 @@ import {
   VALID_CATEGORIES_INCOME,
 } from "../utils/constants.js";
 import { hasAcessToFeature } from "../helpers/userUtils.js";
+import Reminder from "../models/Reminder.js";
 
 const router = express.Router();
 
@@ -45,14 +49,11 @@ router.post("/", async (req, res) => {
   const userMessage = req.body.Body;
   const userId = req.body.From;
 
-  const userStats = await UserStats.findOne(
-    { userId },
-    { blocked: 1 }
-  );
+  const userStats = await UserStats.findOne({ userId }, { blocked: 1 });
 
   if (userStats?.blocked) {
     twiml.message("🚫 Você está bloqueado de usar a ADAP.");
-    res.writeHead(200, {"Content-Type": "text/xml" });
+    res.writeHead(200, { "Content-Type": "text/xml" });
     return res.end(twiml.toString());
   }
 
@@ -250,37 +251,34 @@ router.post("/", async (req, res) => {
         if (!(await hasAcessToFeature(userId, "add_expense_new_category"))) {
           twiml.message(
             "🚫 Este recurso está disponível como um complemento pago.\n\n" +
-            "🤖 Com ele, você poderá criar novas categorias personalizadas!\n\n" +
-            "Por exemplo, criar a categoria \"Transporte\" para registrar gastos com Uber e gasolina, ou \"Fast-food\" para acompanhar o quanto está indo para aquele lanche que você merece... 🍔\n\n" +
-            "Você também pode criar uma categoria como \"Filho\" para controlar os gastos com seu pequeno! 👶\n\n" +
-            "📌 Acesse o link para testar agora mesmo: https://pay.hotmart.com/O99171246D\n\n" +
-            "Caso prefira, pode usar uma das 5 categorias grátis:\n" +
-            "- gastos fixos\n" +
-            "- lazer\n" +
-            "- investimento\n" +
-            "- conhecimento\n" +
-            "- doação\n" +
-            "- outro\n\n" +
-
-            "✅ E agora também é possível registrar receitas!\n" +
-            "Basta adicionar \"Recebi\" antes do valor.\n\n" +
-            "É muito simples:\n\n" +
-            "- Para despesa:\n" +
-            "(Valor) (Onde) em (Categoria)\n" +
-            "Exemplo:\n" +
-            "25 mercado em gastos fixos\n\n" +
-            "- Para receita:\n" +
-            "Recebi (Valor) (De onde) em (Categoria)\n" +
-            "Exemplo:\n" +
-            "Recebi 1500 salário em investimento\n\n" +
-            "Assim, você terá controle total sobre entradas e saídas de dinheiro!"
+              "🤖 Com ele, você poderá criar novas categorias personalizadas!\n\n" +
+              'Por exemplo, criar a categoria "Transporte" para registrar gastos com Uber e gasolina, ou "Fast-food" para acompanhar o quanto está indo para aquele lanche que você merece... 🍔\n\n' +
+              'Você também pode criar uma categoria como "Filho" para controlar os gastos com seu pequeno! 👶\n\n' +
+              "📌 Acesse o link para testar agora mesmo: https://pay.hotmart.com/O99171246D\n\n" +
+              "Caso prefira, pode usar uma das 5 categorias grátis:\n" +
+              "- gastos fixos\n" +
+              "- lazer\n" +
+              "- investimento\n" +
+              "- conhecimento\n" +
+              "- doação\n" +
+              "✅ E agora também é possível registrar receitas!\n" +
+              'Basta adicionar "Recebi" antes do valor.\n\n' +
+              "É muito simples:\n\n" +
+              "- Para despesa:\n" +
+              "(Valor) (Onde) em (Categoria)\n" +
+              "Exemplo:\n" +
+              "25 mercado em gastos fixos\n\n" +
+              "- Para receita:\n" +
+              "Recebi (Valor) (De onde) em (Categoria)\n" +
+              "Exemplo:\n" +
+              "Recebi 1500 salário em investimento\n\n" +
+              "Assim, você terá controle total sobre entradas e saídas de dinheiro!"
           );
           break;
         }
 
         if (newType === "income") {
           if (!newCategory) {
-            //
             devLog("Erro: Categoria não informada. Abortando.");
             twiml.message(
               "🚫 Não consegui identificar a categoria. Tente novamente."
@@ -315,7 +313,6 @@ router.post("/", async (req, res) => {
           );
           break;
         } else if (newType === "expense") {
-          //Adiciona a nova categoria ao banco
           if (!VALID_CATEGORIES.includes(newCategory)) {
             await UserStats.findOneAndUpdate(
               { userId },
@@ -487,7 +484,7 @@ router.post("/", async (req, res) => {
           const getCurrentMonthFormatted = () => {
             const date = new Date();
             const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, "0"); // +1 porque janeiro = 0
+            const month = String(date.getMonth() + 1).padStart(2, "0");
             return `${year}-${month}`;
           };
 
@@ -523,6 +520,25 @@ router.post("/", async (req, res) => {
 
       case "greeting":
         sendGreetingMessage(twiml);
+        break;
+
+      case "reminder":
+        const { description, date } = interpretation.data;
+
+        const newReminder = new Reminder({
+          userId,
+          description: description,
+          date: date,
+        });
+
+        await newReminder.save();
+
+        await sendReminderMessage(twiml, userMessage);
+        break;
+
+      case "get_total_reminders":
+        const totalReminders = await getTotalReminders(userId);
+        sendTotalRemindersMessage(twiml, totalReminders);
         break;
 
       case "financial_help":

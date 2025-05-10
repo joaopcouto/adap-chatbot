@@ -1,5 +1,6 @@
 import Expense from "../models/Expense.js";
 import Income from "../models/Income.js";
+import Reminder from "../models/Reminder.js";
 import UserStats from "../models/UserStats.js";
 
 export async function getCurrentTotalIncome(userId) {
@@ -73,4 +74,36 @@ export async function getCategoryReport(userId, days) {
       },
     },
   ]);
+}
+
+export async function getTotalReminders(userId) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const allFutureRemindersArray = await Reminder.find({
+    userId,
+    date: { $gte: today },
+  });
+
+  const data = allFutureRemindersArray.map(({ description, date }) => ({
+    description,
+    date,
+  }));
+
+  for (let i = 0; i < allFutureRemindersArray.length; i++) {
+    data[i] = {
+      description: allFutureRemindersArray[i].description,
+      date: allFutureRemindersArray[i].date,
+    };
+  }
+
+  const allFutureReminders = data
+    .map((r) => {
+      const dateObj = new Date(r.date);
+      dateObj.setMinutes(dateObj.getMinutes() + dateObj.getTimezoneOffset());
+      const formattedDate = dateObj.toLocaleDateString("pt-BR");
+      return `🗓️ ${r.description.toUpperCase()} - ${formattedDate}`;
+    }).join("\n\n");
+
+  return allFutureReminders;
 }
