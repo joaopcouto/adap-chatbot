@@ -9,6 +9,7 @@ import {
   getExpensesReport,
   getCategoryReport,
   getCurrentTotalSpent,
+  getTotalReminders
 } from "../helpers/totalUtils.js";
 import {
   generateChart,
@@ -30,6 +31,8 @@ import {
   sendTotalExpensesMessage,
   sendTotalExpensesAllMessage,
   sendFinancialHelpMessage,
+  sendReminderMessage,
+  sendTotalRemindersMessage,
   sendTotalExpensesLastMonthsMessage,
 } from "../helpers/messages.js";
 import {
@@ -37,6 +40,7 @@ import {
   VALID_CATEGORIES_INCOME,
 } from "../utils/constants.js";
 import { hasAcessToFeature } from "../helpers/userUtils.js";
+import Reminder from "../models/Reminder.js";
 
 const router = express.Router();
 
@@ -45,14 +49,11 @@ router.post("/", async (req, res) => {
   const userMessage = req.body.Body;
   const userId = req.body.From;
 
-  const userStats = await UserStats.findOne(
-    { userId },
-    { blocked: 1 }
-  );
+  const userStats = await UserStats.findOne({ userId }, { blocked: 1 });
 
   if (userStats?.blocked) {
     twiml.message("🚫 Você está bloqueado de usar a ADAP.");
-    res.writeHead(200, {"Content-Type": "text/xml" });
+    res.writeHead(200, { "Content-Type": "text/xml" });
     return res.end(twiml.toString());
   }
 
@@ -280,7 +281,6 @@ router.post("/", async (req, res) => {
 
         if (newType === "income") {
           if (!newCategory) {
-            //
             devLog("Erro: Categoria não informada. Abortando.");
             twiml.message(
               "🚫 Não consegui identificar a categoria. Tente novamente."
@@ -315,7 +315,6 @@ router.post("/", async (req, res) => {
           );
           break;
         } else if (newType === "expense") {
-          //Adiciona a nova categoria ao banco
           if (!VALID_CATEGORIES.includes(newCategory)) {
             await UserStats.findOneAndUpdate(
               { userId },
@@ -487,7 +486,7 @@ router.post("/", async (req, res) => {
           const getCurrentMonthFormatted = () => {
             const date = new Date();
             const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, "0"); // +1 porque janeiro = 0
+            const month = String(date.getMonth() + 1).padStart(2, "0");
             return `${year}-${month}`;
           };
 
@@ -523,6 +522,25 @@ router.post("/", async (req, res) => {
 
       case "greeting":
         sendGreetingMessage(twiml);
+        break;
+
+      case "reminder":
+        const { description, date } = interpretation.data;
+
+        const newReminder = new Reminder({
+          userId,
+          description: description,
+          date: date,
+        });
+
+        await newReminder.save();
+
+        await sendReminderMessage(twiml, userMessage);
+        break;
+
+      case "get_total_reminders":
+        const totalReminders = await getTotalReminders(userId);
+        sendTotalRemindersMessage(twiml, totalReminders);
         break;
 
       case "financial_help":

@@ -23,6 +23,8 @@ export async function interpretMessageWithAI(message) {
       "get_total_last_months" → The user wants to retrieve the total amount spent in the last months. Extract the month in two formats: "YYYY-MM" and "January 2025". If the user specify the past month, the assistant should return the total amount spent in that month.
       "greeting" → The user sends a greeting (e.g., "Oi", "Olá").
       "instructions" → The user asks how to use the assistant or what it can do.
+      "reminder" → The user asks for a reminder or notification about an appointment, event, or task.
+      "get_total_reminders" → The user asks for all future reminders.
       "financial_help" → The user asks a general finance-related question (e.g., investments, savings, strategies).
       "unknown" → The message does not match any of the above intents.
   
@@ -58,6 +60,11 @@ export async function interpretMessageWithAI(message) {
   - "Salário"
   - "Renda Extra"
 
+  2.1 Extract Relevant Data "reminder":
+  When the intent is "reminder", extract the following information:
+  - Description: A short and meaningful description of the reminder.
+  - Date: The date must be always in the future or today, in the format ISO 8601. Always consider year 2025 as the current year.
+
   3. Validation & Categorization Rules:
     - If the category is not specified, determine it based on the description using the valid categories.
     - If categorization is unclear or the user has access to "add_expense_new_category" (user-defined categories), and there is a past expense/income with the same description, reuse the last known category used for that description.
@@ -74,7 +81,7 @@ export async function interpretMessageWithAI(message) {
        Respond only with a valid JSON object without any additional formatting or explanation
      - Return a JSON object with the intent and extracted data. Use this format:
        {
-         "intent": "add_income" | "add_expense" | "add_expense_new_category" | "delete_transaction" | "generate_daily_chart" | "generate_category_chart" | "get_total_income" |"get_total" | "get_total_all" | "get_total_last_months" | "greeting" | "instructions" | "financial_help",
+         "intent": "add_income" | "add_expense" | "add_expense_new_category" | "delete_transaction" | "generate_daily_chart" | "generate_category_chart" | "get_total_income" |"get_total" | "get_total_all" | "get_total_last_months" | "greeting" | "instructions" | "reminder" |"financial_help",
          "data": {
            "amount": number,
            "description": string,
@@ -84,6 +91,7 @@ export async function interpretMessageWithAI(message) {
            "month": string,
            "monthName": string,
            "type": string,
+           "date": string,
          }
        }
   
@@ -121,12 +129,16 @@ export async function interpretMessageWithAI(message) {
        Response: { "intent": "greeting", "data": {} }
      - User: "Como usar?"
        Response: { "intent": "instructions", "data": {} }
+     - User: "Dia 15 preciso pagar o meu cartão de crédito"
+       Response: { "intent": "reminder", "data": { "description": "pagar o meu cartão de crédito", "date": "2025-05-15T00:00:00.000Z" } }
+     - User: "Quais são meus lembretes?"
+       Response: { "intent": "get_total_reminders", "data":{} }
      - User: "Devo investir mais em ações ou renda fixa?"
        Response: { "intent": "financial_help", "data": {} }
      - User: "30 uber transporte"
        Response: { "intent": "add_expense_new_category", "data": { "amount": 30, "description": "uber", "category": "transporte" } }
   
-
+  
   Now, interpret this message: "${message}"`;
 
   const response = await openai.chat.completions.create({
