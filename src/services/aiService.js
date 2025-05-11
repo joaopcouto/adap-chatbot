@@ -24,6 +24,7 @@ export async function interpretMessageWithAI(message) {
       "greeting" → The user sends a greeting (e.g., "Oi", "Olá").
       "instructions" → The user asks how to use the assistant or what it can do.
       "reminder" → The user asks for a reminder or notification about an appointment, event, or task.
+      "delete_reminder" → The user asks to delete a reminder. Extract the messageId.
       "get_total_reminders" → The user asks for all future reminders.
       "financial_help" → The user asks a general finance-related question (e.g., investments, savings, strategies).
       "unknown" → The message does not match any of the above intents.
@@ -81,7 +82,7 @@ export async function interpretMessageWithAI(message) {
        Respond only with a valid JSON object without any additional formatting or explanation
      - Return a JSON object with the intent and extracted data. Use this format:
        {
-         "intent": "add_income" | "add_expense" | "add_expense_new_category" | "delete_transaction" | "generate_daily_chart" | "generate_category_chart" | "get_total_income" |"get_total" | "get_total_all" | "get_total_last_months" | "greeting" | "instructions" | "reminder" |"financial_help",
+         "intent": "add_income" | "add_expense" | "add_expense_new_category" | "delete_transaction" | "generate_daily_chart" | "generate_category_chart" | "get_total_income" |"get_total" | "get_total_all" | "get_total_last_months" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "financial_help",
          "data": {
            "amount": number,
            "description": string,

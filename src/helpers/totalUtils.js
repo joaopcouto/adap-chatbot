@@ -94,6 +94,7 @@ export async function getTotalReminders(userId) {
     data[i] = {
       description: allFutureRemindersArray[i].description,
       date: allFutureRemindersArray[i].date,
+      messageId: allFutureRemindersArray[i].messageId,
     };
   }
 
@@ -102,7 +103,8 @@ export async function getTotalReminders(userId) {
       const dateObj = new Date(r.date);
       dateObj.setMinutes(dateObj.getMinutes() + dateObj.getTimezoneOffset());
       const formattedDate = dateObj.toLocaleDateString("pt-BR");
-      return `🗓️ ${r.description.toUpperCase()} - ${formattedDate}`;
+      const messageCode = r.messageId ? `#${r.messageId}` : "";
+      return `🗓️ ${r.description.toUpperCase()} - ${formattedDate} - ${messageCode}`;
     }).join("\n\n");
 
   return allFutureReminders;

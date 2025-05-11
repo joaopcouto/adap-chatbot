@@ -140,16 +140,15 @@ export function sendTotalExpensesLastMonthsMessage(
 
 export function sendTotalRemindersMessage(twiml, allFutureReminders) {
   twiml.message(
-    `Aqui estão seus próximos compromissos:\n\n${allFutureReminders}  \n\nSe quiser mais detalhes ou adicionar novos lembretes, é só me chamar! 😊`
+    `Aqui estão seus próximos compromissos:\n\n${allFutureReminders}\n\n Para apagar um lembrete, basta digitar "Apagar lembrete #codigo-do-lembrete"  \n\nSe quiser mais detalhes ou adicionar novos lembretes, é só me chamar! 😊`
   );
 }
 
-export async function sendReminderMessage(twiml, message) {
+export async function sendReminderMessage(twiml, message, reminderData) {
   const prompt = `Based on the provided information, write a short, friendly, and natural sentence in Brazilian Portuguese as if you are confirming or acknowledging the task or event, using a tone similar to: "Marquei aqui sua aula pro dia 14 de maio" or "Anotei seu compromisso para o dia tal".
   Only return the final sentence, no extra explanations.
   Use this message to retrieve the data:
-  "${message}"`;
-
+  data: ${message} include this at the end: #${reminderData.messageId}`;
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [{ role: "user", content: prompt }],
@@ -157,6 +156,11 @@ export async function sendReminderMessage(twiml, message) {
   });
 
   twiml.message(response.choices[0].message.content);
+}
+
+export function sendReminderDeletedMessage(twiml, reminderData){
+  twiml.message(`🗑️ Lembrete #_${reminderData.messageId}_ removido.`);
+
 }
 
 export async function sendFinancialHelpMessage(twiml, message) {
