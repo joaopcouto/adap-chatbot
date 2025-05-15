@@ -6,7 +6,7 @@ import webhookRouter from "./src/routes/webhook.js";
 
 const app = express();
 app.use("/images", express.static("/tmp"));
-app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.urlencoded({ extended: true }));
 
 app.use("/webhook", webhookRouter);
 

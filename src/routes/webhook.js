@@ -49,6 +49,7 @@ router.post("/", async (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
   const userMessage = req.body.Body;
   const userId = req.body.From;
+  console.log(userId);
 
   const userStats = await UserStats.findOne({ userId }, { blocked: 1 });
 
