@@ -1,12 +1,11 @@
 import "dotenv/config";
 import express from "express";
-import bodyParser from "body-parser";
 import { connectToDatabase } from "./src/config/database.js";
 import webhookRouter from "./src/routes/webhook.js";
 
 const app = express();
 app.use("/images", express.static("/tmp"));
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true }));
 
 app.use("/webhook", webhookRouter);
 

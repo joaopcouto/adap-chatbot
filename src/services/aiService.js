@@ -13,7 +13,7 @@ export async function interpretMessageWithAI(message) {
      Determine the user's intent based on their message. Possible intents include:
       "add_income" → The user wants to log an income. Extract the amount, description, and category. 
       "add_expense" → The user wants to log an expense. Extract the amount, description, and category.
-      "add_expense_new_category" → The user wants to log an transaction with a new category. Extract the amount, description, category, and type.
+      "add_expense_new_category" → The user wants to log an transaction (income or expense) with a new category. Extract the amount, description, category, and type.
       "delete_transaction" → The user wants to delete an expense. Extract the messageId.
       "generate_daily_chart" → The user wants to generate a daily expense chart. Extract the amount of days.  
       "generate_category_chart" → The user wants to generate a category-wise expense chart. Extract the days.
@@ -48,7 +48,7 @@ export async function interpretMessageWithAI(message) {
     - IF the category IS EXACTLY one of the following ("gastos fixos", "lazer", "investimento", "conhecimento", "doação" for expenses or "Salário", "Renda Extra" for income),
       THEN keep the intent as "add_expense" or "add_income" depending on the message type.
     - ELSE (if the provided category does not exactly match any of the above),
-      THEN the intent MUST be "add_expense_new_category", and you must extract the category exactly as written by the user.
+      THEN the intent MUST be "add_expense_new_category", and you must extract the category exactly as written by the user, along with the type (income or expense).
 
   Valid categories for "add_expense":
   - "gastos fixos"
@@ -102,7 +102,8 @@ export async function interpretMessageWithAI(message) {
      - User: "12 lanche" 
        Response: { intent: "add_expense", data: { amount: 12, description: "lanche", category: determine it based on the description using the valid categories } }
       - User: "15 uber" → { intent: "add_expense", data: { amount: 15, description: "uber", category: determine it based on the  description using the valid categories  } }
-      - User "Recebi 2000 com brigadeiro em venda" → { intent: "add_expense_new_category", data: { amount: 2000, description: "brigadeiro", category: "venda", type: "income" } }
+      - User: "Recebi 2000 com brigadeiro em venda" → { intent: "add_expense_new_category", data: { amount: 2000, description: "brigadeiro", category: "venda", type: "income" } }
+     - User: "Recebi 20 com freelance na categoria extras" → { intent: "add_expense_new_category", data: { amount: 20, description: "freelance", category: "extras", type: "income" } }
      - User: "25 comida em alimentação" → { intent: "add_expense_new_category", data: { amount: 25, description: "comida", category: "alimentação", type: "expense" } }
      - User: "Gastei 50 com filmes em lazer"
        Response: { "intent": "add_expense", "data": { "amount": 50, "description": "filmes", "category": "lazer" } }

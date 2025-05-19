@@ -67,7 +67,7 @@ router.post("/", async (req, res) => {
       userId,
       "add_expense_new_category"
     );
-    devLog(interpretation.intent);
+    devLog("intent:" + interpretation.intent);
 
     switch (interpretation.intent) {
       case "add_income": {
