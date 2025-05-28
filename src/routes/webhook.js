@@ -262,8 +262,7 @@ router.post("/", async (req, res) => {
               "- lazer\n" +
               "- investimento\n" +
               "- conhecimento\n" +
-              "- doação\n" +
-              "- outro\n\n" +
+              "- doação\n\n" +
               "✅ E agora também é possível registrar receitas!\n" +
               'Basta adicionar "Recebi" antes do valor.\n\n' +
               "É muito simples:\n\n" +
