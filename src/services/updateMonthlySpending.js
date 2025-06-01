@@ -4,7 +4,7 @@ import dayjs from "dayjs";
 
 export async function updateMonthlySpending() {
     try {
-        const currentMonth = dayjs().subtract(1, "month").format('YYYY-MM');
+        const currentMonth = dayjs().subtract(1, "month").format('YYYY-MM'); 
 
         const userStatsList = await UserStats.find({});
         console.log(`Usuários encontrados: ${userStatsList.length}`);
@@ -18,7 +18,7 @@ export async function updateMonthlySpending() {
             });
 
             if (user.spendingHistory.length > 3) {
-                user.spendingHistory = user.spendingHistory.slice(-3);
+                user.spendingHistory = user.spendingHistory.slice(-3);  
             }
 
             user.totalSpent = 0;
@@ -43,9 +43,9 @@ export async function updateMonthlySpending() {
     }
 }
 
-const dbName = "test";
+const dbName = "prod";
 
-mongoose.connect("mongodb+srv://joaopc:jp2209@cluster0.x9s5k.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0", {
+mongoose.connect(process.env.MONGO_URI, {
     dbName,
 })
     .then(() => {
