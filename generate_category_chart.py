@@ -68,23 +68,18 @@ num_categories = len(categories) #numero de categorias atual
 colors_to_use = [] #numero de cores para usar na paleta
 
 if num_categories > 0: #valida se existe ao menos 1 categoria
-    verde_claro = "#F3E5AB"    
-    verde_medio = "#E6D27A"    
-    verde_escuro = "#C8B458"   
-    
-    #alternativa com menos saturação:
-    #verde_claro = "#C8E6C9" 
-    #verde_medio = "#81C784"   
-    #verde_escuro = "#4CAF50"
+    vermelho_claro = "#FFDDDD"    
+    vermelho_medio = "#FFB3B3"    
+    vermelho_escuro = "#FF8C8C"   
 
     if num_categories == 1: #se houver uma categoria, usar medio
-        colors_to_use = [verde_medio]
+        colors_to_use = [vermelho_medio]
     elif num_categories % 2 != 0:  #se é ímpar, usar os três tons
-        three_shades = [verde_claro, verde_medio, verde_escuro]
+        three_shades = [vermelho_claro, vermelho_medio, vermelho_escuro]
         for i in range(num_categories):
             colors_to_use.append(three_shades[i % 3]) #adiciona uma cor de cada vez até atingir o numero de categorias
     else:  # se é par, usar dois tons extremos
-        two_shades = [verde_claro, verde_escuro] # também adiciona uma cor de cada vez até atingir o numero de categorias
+        two_shades = [vermelho_claro, vermelho_escuro] # também adiciona uma cor de cada vez até atingir o numero de categorias
         for i in range(num_categories):
             colors_to_use.append(two_shades[i % 2])
 
