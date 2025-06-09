@@ -42,55 +42,63 @@ dias_semana = {
 }
 
 try:
-    dates = [datetime.datetime.strptime(item["_id"], "%Y-%m-%d") for item in data]
+    # 1. Calcular os últimos 7 dias
+    hoje = datetime.date.today()
+    ultimos_7_dias = [hoje - datetime.timedelta(days=i) for i in range(6, -1, -1)]  # Ordem correta
+
+    # Converter as datas do JSON para objetos datetime.date (removendo a parte da hora)
+    dates = [datetime.datetime.strptime(item["_id"], "%Y-%m-%d").date() for item in data]
     totals = [item["total"] for item in data]
-    weekdays = [dias_semana[d.strftime("%a")] for d in dates]
-    formatted_dates = [f"{dias_semana[d.strftime('%a')]} ({d.strftime('%d/%m')})" for d in dates]
+
+    # Criar um dicionário para armazenar os totais de gastos por data
+    totals_por_dia = {data: 0 for data in ultimos_7_dias}
+
+    # Preencher o dicionário com os dados do JSON
+    for d, total in zip(dates, totals):
+        if d in totals_por_dia:
+            totals_por_dia[d] = total
+
+    # Formatar as datas para exibição no gráfico
+    dias_plot = [f"{dias_semana[d.strftime('%a')]} ({d.strftime('%d/%m')})" for d in ultimos_7_dias]
+    totais_plot = [totals_por_dia[d] for d in ultimos_7_dias]  # Ordem correta
+
 except Exception as e:
     print(f"Erro ao processar os dados: {e}")
     sys.exit(1)
 
-dias_da_semana_ordenados = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
-totals_por_dia = {dia: 0 for dia in dias_da_semana_ordenados}
-formatted_labels = {dia: "" for dia in dias_da_semana_ordenados}
-
-for d, dia, total in zip(dates, weekdays, totals):
-    totals_por_dia[dia] = total
-    formatted_labels[dia] = f"{dia} ({d.strftime('%d/%m')})"
-
-dias_plot = [formatted_labels[dia] if formatted_labels[dia] else dia for dia in dias_da_semana_ordenados]
-totais_plot = list(totals_por_dia.values())
-
 total_gastos = sum(totais_plot)
 
+# Definindo a cor
+vermelho_escuro = "#FF8C8C"
+
 fig, ax = plt.subplots(figsize=(14, 6))
-bars = ax.bar(dias_plot, totais_plot, color="#064e3b", alpha=0.8, width=0.6)
+bars = ax.bar(dias_plot, totais_plot, color=vermelho_escuro, alpha=0.8, width=0.6)  # Definindo a cor diretamente
 
 for bar, total in zip(bars, totais_plot):
     ax.text(
         bar.get_x() + bar.get_width() / 2,
         bar.get_height() + max(totais_plot) * 0.02,
         f"R$ {total:.2f}",
-        ha="center", va="bottom", fontsize=10, fontweight="bold", color="#064e3b"
+        ha="center", va="bottom", fontsize=10, fontweight="bold", color="black"
     )
 
 ax.set_xlabel("")
 ax.set_ylabel("")
-ax.set_title("Gastos nos últimos dias", fontsize=14, fontweight="bold", loc="center", color="#064e3b")
+ax.set_title("Gastos nos últimos dias", fontsize=14, fontweight="bold", loc="center", color="#000000")
 
 ax.text(
     0.5, 1.05,
     f"Total: R$ {total_gastos:.2f}",
-    fontsize=12, fontweight="bold", color="#064e3b", ha="center", transform=ax.transAxes
+    fontsize=12, fontweight="bold", color="black", ha="center", transform=ax.transAxes
 )
 
 ax.spines["top"].set_visible(False)
 ax.spines["right"].set_visible(False)
 ax.spines["left"].set_visible(False)
-ax.spines["bottom"].set_color("#064e3b")
+ax.spines["bottom"].set_color("#000000")
 
 ax.set_xticks(np.arange(len(dias_plot)))
-ax.set_xticklabels(dias_plot, rotation=0, fontsize=12, color="#064e3b", ha="center")
+ax.set_xticklabels(dias_plot, rotation=0, fontsize=12, color="black", ha="center")
 
 plt.yticks([])
 plt.tight_layout()
