@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt #para crição de gráficos
 import os #para interagir com o sistema, exemplo: abrir arquivos
 import cloudinary #para interagir com a plataforma
 import cloudinary.uploader #módulo para uploads
+import string
 
 script_dir = os.path.dirname(os.path.abspath(__file__)) #diretorio raiz do script
 os.chdir(script_dir) #diretorio atual vira o do script
@@ -40,7 +41,7 @@ if not data: #identifica um json vazio
     print("Erro: Nenhum dado encontrado no JSON!")
     sys.exit(1)
 
-#tratando os dados para o gráfico 
+#tratando os dados para o gráfico
 categories = [] #categorias
 amounts = [] #valores
 
@@ -70,7 +71,7 @@ colors_to_use = [] #numero de cores para usar na paleta
 if num_categories > 0: #valida se existe ao menos 1 categoria
     vermelho_claro = "#FFDDDD"    
     vermelho_medio = "#FFB3B3"    
-    vermelho_escuro = "#FF8C8C"   
+    vermelho_escuro = "#FF8C8C"
 
     if num_categories == 1: #se houver uma categoria, usar medio
         colors_to_use = [vermelho_medio]
@@ -87,51 +88,49 @@ if num_categories > 0: #valida se existe ao menos 1 categoria
 def format_value_for_pie(pct, all_values): #recebe a porcentagem da categoria e uma lista com todos os valores
     if not all_values or sum(all_values) == 0: #descarta valores nulos
         return ''
-    absolute = pct/100.*sum(all_values)
-    return f"R$ {absolute:,.1f}\n({pct:.1f}%)" # zero casas decimais para não poluir
+    return f'({pct:.0f}%)' # zero casas decimais para não poluir
 
 #criar gráfico de pizza
 if data: #mais uma vez, validando dados
-    fig, ax = plt.subplots(figsize=(12, 7.5)) #configurações de plot
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 12), gridspec_kw={'height_ratios': [3, 1]})
 
     # Se não houver valores positivos para plotar após o processamento, imprime uma imagem no grafico
     if not amounts or all(a <= 0 for a in amounts):
-        ax.text(0.5, 0.5, "Não há gastos positivos para exibir.",
+        ax1.text(0.5, 0.5, "Não há gastos positivos para exibir.",
                 horizontalalignment='center', verticalalignment='center',
-                fontsize=12, transform=ax.transAxes, wrap=True)
-        ax.axis('off') # Esconde os eixos
+                fontsize=12, transform=ax1.transAxes, wrap=True)
+        ax1.axis('off') # Esconde os eixos
     else:
-        wedges, texts, autotexts = ax.pie(
+        wedges, texts, autotexts = ax1.pie(
             amounts, #valores de cada fatia
             autopct=lambda pct: format_value_for_pie(pct, amounts), #funcao lambda para formatação rapida
             startangle=90, # Começa no topo
             colors=colors_to_use,
-            pctdistance=1.15, # Distância do texto do centro (maior de 1 é fora do grafico)
+            pctdistance=1.05,  # Ajuste a distância para melhor visualização
             wedgeprops=dict(edgecolor='white', linewidth=1.5) # Borda branca entre fatias
         )
 
-        # texto dentro das fatias
-        for autotext_obj in autotexts:
+        # Adiciona os números nas fatias
+        for i, autotext_obj in enumerate(autotexts):
+            letter = string.ascii_uppercase[i % 26]  # Pega a letra correspondente
+            autotext_obj.set_text(letter)  # Exibe a letra da categoria
             autotext_obj.set_fontsize(8.5) # Tamanho menor para caber valores
             autotext_obj.set_weight("bold") # negrito
             autotext_obj.set_color("black") # Cor do texto
 
-        # adiciona legenda
-        legend_labels = [f"{cat} (R$ {amt:,.2f})" for cat, amt in zip(categories, amounts)]
+        ax1.set_title("Distribuição de Gastos por Categoria", fontsize=15, fontweight="bold", pad=25)
 
-        ax.legend(
-            wedges, # Os objetos 'wedge' para que o matplotlib associe as cores
-            legend_labels,
-            title="Categorias de Gastos",
-            loc="center left",
-            bbox_to_anchor=(1.02, 0.5), # (x, y) da âncora da legenda, fora do eixo principal
-            fontsize=9.5,
-            title_fontsize=11
-        )
-    ax.set_title("Distribuição de Gastos por Categoria", fontsize=15, fontweight="bold", pad=25)
-    # Ajustar layout para garantir que a legenda não seja cortada
-    # rect = [left, bottom, right, top] em coordenadas da figura (0 a 1)
-    plt.tight_layout(rect=[0, 0, 0.82, 1])
+    # adiciona legenda
+    legend_labels = [f"{string.ascii_uppercase[i % 26]}: {cat} - R$ {amt:,.0f} {format_value_for_pie(amounts[i] / sum(amounts) * 100, amounts)}" for i, (cat, amt) in enumerate(zip(categories, amounts))]
+    ax2.axis('off')  # Desativa os eixos do subplot da legenda
+    ax2.legend(
+        wedges,
+        legend_labels,
+        title="Categorias de Gastos",
+        loc="center",
+        fontsize=9.5,
+        title_fontsize=11
+    )
     
 # Salvar a imagem
 try:
