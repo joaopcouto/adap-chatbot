@@ -40,7 +40,7 @@ if not data: #identifica um json vazio
     print("Erro: Nenhum dado encontrado no JSON!")
     sys.exit(1)
 
-#tratando os dados para o gráfico
+#tratando os dados para o gráfico 
 categories = [] #categorias
 amounts = [] #valores
 
