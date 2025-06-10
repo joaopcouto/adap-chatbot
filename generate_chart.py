@@ -72,7 +72,7 @@ total_gastos = sum(totais_plot)
 vermelho_escuro = "#FF8C8C"
 
 fig, ax = plt.subplots(figsize=(14, 6))
-bars = ax.bar(dias_plot, totais_plot, color=vermelho_escuro, alpha=0.8, width=0.6)  # Definindo a cor diretamente
+bars = ax.bar(dias_plot, totais_plot, color=vermelho_escuro, alpha=0.8, width=0.6, edgecolor="black", linewidth=1)  # Definindo a cor diretamente
 
 for bar, total in zip(bars, totais_plot):
     ax.text(
