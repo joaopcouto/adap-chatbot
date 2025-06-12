@@ -1,15 +1,15 @@
 import express from "express";
 import twilio from "twilio";
 import { devLog } from "../helpers/logger.js";
-
 import { interpretMessageWithAI } from "../services/aiService.js";
 import {
   calculateTotalExpenses,
-  getCurrentTotalIncome,
+  calculateTotalIncome,
   getExpensesReport,
   getCategoryReport,
   getCurrentTotalSpent,
   getTotalReminders,
+  getCategoryExpenses
 } from "../helpers/totalUtils.js";
 import {
   generateChart,
@@ -45,12 +45,16 @@ import Reminder from "../models/Reminder.js";
 
 const router = express.Router();
 
+// Variável para armazenar o estado da conversa
+let conversationState = {};
+
 router.post("/", async (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
   const userMessage = req.body.Body;
   const userId = req.body.From;
   console.log(userId);
 
+  const previousData = conversationState[userId]; //variavel estado da conversa para detalhes
   const userStats = await UserStats.findOne({ userId }, { blocked: 1 });
 
   if (userStats?.blocked) {
@@ -69,23 +73,23 @@ router.post("/", async (req, res) => {
     );
     devLog("intent:" + interpretation.intent);
 
+    // Salvar o estado da conversa
+    conversationState[userId] = {...previousData, ...interpretation.data}; //spred e mantendo valores das variaveis originais
+
     switch (interpretation.intent) {
       case "add_income": {
-        const { amount, description, category, messageId } =
-          interpretation.data;
+        const { amount, description, category, messageId } = interpretation.data;
         devLog(amount, description, category);
 
         let finalCategory = category || "outro";
         if (
-          !VALID_CATEGORIES_INCOME.includes(finalCategory) &&
-          !userHasFreeCategorization
+          !VALID_CATEGORIES_INCOME.includes(finalCategory) && !userHasFreeCategorization
         ) {
           finalCategory = "outro";
         }
 
         if (
-          VALID_CATEGORIES_INCOME.includes(finalCategory) &&
-          !userHasFreeCategorization
+          VALID_CATEGORIES_INCOME.includes(finalCategory) && !userHasFreeCategorization
         ) {
           const newIncome = new Income({
             userId,
@@ -114,7 +118,6 @@ router.post("/", async (req, res) => {
 
           if (userHasFreeCategorization && similarIncome?.category) {
             const inferredIncome = similarIncome.category;
-
             const newIncome = new Income({
               userId,
               amount,
@@ -155,7 +158,7 @@ router.post("/", async (req, res) => {
         break;
       }
 
-      case "add_expense":
+      case "add_expense": {
         {
           const { amount, description, category, messageId } =
             interpretation.data;
@@ -240,6 +243,7 @@ router.post("/", async (req, res) => {
           }
         }
         break;
+      } 
 
       case "add_expense_new_category": {
         const {
@@ -263,7 +267,7 @@ router.post("/", async (req, res) => {
               "- investimento\n" +
               "- conhecimento\n" +
               "- doação\n\n" +
-              "✅ E agora também é possível registrar receitas!\n" +
+              "✅ E agora também é possível registrar receitas!\n\n" +
               'Basta adicionar "Recebi" antes do valor.\n\n' +
               "É muito simples:\n\n" +
               "- Para despesa:\n" +
@@ -460,69 +464,104 @@ router.post("/", async (req, res) => {
         }
         break;
 
-      case "get_total":
-        {
-          const { category, type } = interpretation.data;
-          console.log("Tipo:", type, "Categoria:", category);
-          const total = await calculateTotalExpenses(userId, category, type);
-          sendTotalExpensesMessage(twiml, total, category, type);
+      case "get_total": {
+        const { category, month, monthName } = interpretation.data; // Extraindo o parâmetro "month"
+        console.log("O que a IA entendeu sobre esse comando");
+        console.log("Categoria:", category, "Mês:", month, "Nome do Mês:", monthName); // ADICIONANDO LOG
+        const total = await calculateTotalExpenses(userId, category, month);
+        let previousData = { category, month, monthName }; // salva as informações necessárias para a detalhes
+        conversationState[userId] = previousData; 
+        if (category) {
+          //alteracoes
+          const categoryMessage = `*Gasto total* em _*${category.charAt(0).toUpperCase() + category.slice(1)}*_ no mês de _*${monthName}*_: \nR$ ${total.toFixed(2)}. \n\nDigite "detalhes" para mostrar os gastos`;
+          twiml.message(categoryMessage);
+        }
+        else {
+          const totalMessage = `*Gasto total* em _*${monthName}*_: \nR$ ${total.toFixed(2)}. \n\nDigite "detalhes" para mostrar os gastos`;
+          twiml.message(totalMessage);
         }
         break;
-
-      case "get_total_income":
-        const totalIncome = await getCurrentTotalIncome(userId);
-        sendTotalIncomeMessage(twiml, totalIncome);
+      }
+      
+      case "get_total_income": {
+        const { month, monthName } = interpretation.data; // Extraindo o parâmetro "month"
+        console.log("Mês:", month);
+        const totalIncome = await calculateTotalIncome(userId, month);
+        let previousData = { month, monthName }; // salva as informações necessárias para a detalhes
+        conversationState[userId] = previousData;
+        sendTotalIncomeMessage(twiml, totalIncome, monthName);
         break;
+      }
 
-      case "get_total_all":
+      //ESSA FUNCAO PRECISA SER ARRUMADA, TALVEZ REMOVIDA, PARA QUE SEJA UTILIZADA A MESMA FORMATACAO DA GET TOTAL 
+      //para essa mudança, o prompt para IA deve ser ajustado
+      case "get_total_all": {
         const totalAll = await getCurrentTotalSpent(userId);
         sendTotalExpensesAllMessage(twiml, totalAll);
         break;
+      }
 
-      case "get_total_last_months":
-        {
-          const { monthName, month: interpretationDataMonth } =
-            interpretation.data;
-          const getCurrentMonthFormatted = () => {
-            const date = new Date();
-            const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, "0");
-            return `${year}-${month}`;
-          };
+      case "get_total_last_months": {
+        const { monthName, month: interpretationDataMonth } = interpretation.data;
+        const getCurrentMonthFormatted = () => {
+          const date = new Date();
+          const year = date.getFullYear();
+          const month = String(date.getMonth() + 1).padStart(2, "0");
+          return `${year}-${month}`;
+        };
 
-          const currentMonth = getCurrentMonthFormatted();
+        const currentMonth = getCurrentMonthFormatted();
 
           if (
-            interpretationDataMonth < "2025-01" ||
-            interpretationDataMonth > currentMonth
+            interpretationDataMonth < "2025-01" || interpretationDataMonth > currentMonth
           ) {
             twiml.message("🚫 Mês inválido. Tente novamente.");
             break;
           } else {
-            const spendingHistoryLastMonths = await UserStats.aggregate([
-              { $match: { userId } },
-              { $unwind: "$spendingHistory" },
-              { $match: { "spendingHistory.month": interpretationDataMonth } },
-              {
-                $group: {
-                  _id: null,
-                  total: { $sum: "$spendingHistory.amount" },
+              const spendingHistoryLastMonths = await UserStats.aggregate([
+                { $match: { userId } },
+                { $unwind: "$spendingHistory" },
+                { $match: { "spendingHistory.month": interpretationDataMonth } },
+                { $group: {
+                    _id: null,
+                    total: { $sum: "$spendingHistory.amount" },
+                  },
                 },
-              },
-            ]);
-
+              ]);
+            // Adicionando a verificação se o array está vazio
+            const total = spendingHistoryLastMonths.length > 0 ? spendingHistoryLastMonths[0].total : 0;
+            
             sendTotalExpensesLastMonthsMessage(
               twiml,
-              spendingHistoryLastMonths,
+              total, // Modificando para passar o valor diretamente
               monthName
             );
           }
-        }
         break;
+      }
+        
 
-      case "greeting":
+      case "detalhes": {
+        const previousData = conversationState[userId];
+        if (!previousData) {
+          twiml.message("🚫 Não consigo listar os itens, tente pedir o total novamente.");
+          break;
+        }
+        const { category, month, monthName } = previousData;
+        devLog ("detalhes das categorias")
+        console.log("Dados para getCategoryExpenses -> userId:", userId, "month:", month, "category:", category, "monthName:", monthName )
+        const detalhes = await getCategoryExpenses(userId, month, monthName, category)
+        console.log("Dados da requisição anterior", previousData )
+        //para entender os valores passados na detalhes
+        //twiml.message(`${detalhes} Categoria: ${category} \nMês: ${month} \nNome do Mês: ${monthName}`);
+        twiml.message(detalhes);
+        break;
+      }
+      
+      case "greeting":{
         sendGreetingMessage(twiml);
         break;
+      }
 
       case "reminder":
         const { description, date } = interpretation.data;

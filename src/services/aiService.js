@@ -18,9 +18,10 @@ export async function interpretMessageWithAI(message) {
       "generate_daily_chart" → The user wants to generate a daily expense chart. Extract the amount of days.  
       "generate_category_chart" → The user wants to generate a category-wise expense chart. Extract the days.
       "get_total_income" → The user wants to retrieve the total amout income.
-      "get_total" → The user wants to retrieve the total amount spent or income in a specific category. Extract the category, which can be any of the valid categories or user-defined ones, in case of user-defined categories, extract exactly as the user wrote it. Extract the type (income or expense).
-      "get_total_all" → The user wants to retrieve the total amount spent across all categories.
+      "get_total" → The user wants to retrieve the total amount spent or income in a specific category
+      "get_total_all" → The user wants to retrieve the total amout income
       "get_total_last_months" → The user wants to retrieve the total amount spent in the last months. Extract the month in two formats: "YYYY-MM" and "January 2025". If the user specify the past month, the assistant should return the total amount spent in that month.
+      "detalhes" → The user wants to show a list of all itens in a certain data"
       "greeting" → The user sends a greeting (e.g., "Oi", "Olá").
       "instructions" → The user asks how to use the assistant or what it can do.
       "reminder" → The user asks for a reminder or notification about an appointment, event, or task.
@@ -29,6 +30,13 @@ export async function interpretMessageWithAI(message) {
       "financial_help" → The user asks a general finance-related question (e.g., investments, savings, strategies).
       "unknown" → The message does not match any of the above intents.
   
+    1a. When the intent is "get_total", extract the following information:
+      - Category: The category for which the total is requested.
+      - Month (Optional): If the user specifies a month (e.g., "em janeiro"), extract the month in the format "YYYY-MM" (e.g., "2025-01") and also extract the month name (e.g., "Janeiro"). If no month is specified, leave the month field empty.
+
+    1b. When the intent is "get_total_income", extract the following information:
+      - Month (Optional): If the user specifies a month (e.g., "em janeiro"), extract the month in the format "YYYY-MM" (e.g., "2025-01") and also extract the month name (e.g., "Janeiro"). If no month is specified, leave the month field empty.
+
   2. Extract Relevant Data for "add_expense" and "add_income":
 
   When the intent is "add_expense" or "add_income", extract the following information:
@@ -41,7 +49,6 @@ export async function interpretMessageWithAI(message) {
     - Compare it to the valid categories.
     - If it matches exactly, proceed with "add_expense" intent or "add_income" depending on the message type.
     - If it does not match, set intent to "add_expense_new_category" and use it exactly as provided.
-  - Type: Specify whether the transaction is an expense or income.
 
   Important Rule:
   IF the user provides a category,
@@ -61,10 +68,10 @@ export async function interpretMessageWithAI(message) {
   - "Salário"
   - "Renda Extra"
 
-  2.1 Extract Relevant Data "reminder":
-  When the intent is "reminder", extract the following information:
-  - Description: A short and meaningful description of the reminder.
-  - Date: The date must be always in the future or today, in the format ISO 8601. Always consider year 2025 as the current year.
+    2b. Extract Relevant Data "reminder":
+      When the intent is "reminder", extract the following information:
+      - Description: A short and meaningful description of the reminder.
+      - Date: The date must be always in the future or today, in the format ISO 8601. Always consider year 2025 as the current year.
 
   3. Validation & Categorization Rules:
     - If the category is not specified, determine it based on the description using the valid categories.
@@ -91,7 +98,6 @@ export async function interpretMessageWithAI(message) {
            "days": number,
            "month": string,
            "monthName": string,
-           "type": string,
            "date": string,
          }
        }
@@ -127,6 +133,14 @@ export async function interpretMessageWithAI(message) {
        Response: { "intent": "get_total_all", "data": {} }
      - User: "Quanto gastei no mês de fevereiro?" 
        Response: { "intent": "get_total_last_months", "data": { "month": "2025-02", "monthName": "Fevereiro" }}
+     - User: "Qual é o meu GASTO total em gastos fixos em Junho?"
+       Response: { "intent": "get_total", "data": { "category": "gastos fixos", "monthName":"Junho", "month": "2024-06"} }
+     - User: "Qual é o meu GASTO total em Junho?"*
+       Response: { "intent": "get_total", "data": { "monthName":"Junho", "month": "2024-06"} }*
+     - User: "Qual é o meu GASTO total"*
+       Response: { "intent": "get_total", "data": { } }*
+     - User: "detalhes"
+       Response: { "intent": "detalhes", "data": { "category": "nome da categoria", "month": "2023-10" , "monthName": outubro} }
      - User: "Olá!"
        Response: { "intent": "greeting", "data": {} }
      - User: "Como usar?"
