@@ -130,6 +130,4 @@ dist
 .pnp.*
 
 ## JS
-
-testMonthlySpending.js
-migrateUserStats.js
+.DS_Store
