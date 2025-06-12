@@ -107,7 +107,7 @@ if data: #mais uma vez, validando dados
             startangle=90, # Começa no topo
             colors=colors_to_use,
             pctdistance=1.05,  # Ajuste a distância para melhor visualização
-            wedgeprops=dict(edgecolor='white', linewidth=1.5) # Borda branca entre fatias
+            wedgeprops=dict(edgecolor='black', linewidth=1) # Borda branca entre fatias
         )
 
         # Adiciona os números nas fatias
