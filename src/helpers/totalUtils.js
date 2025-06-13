@@ -56,16 +56,6 @@ export async function calculateTotalExpenses(userId, category = null, month = nu
   }
 }
 
-export async function getCurrentTotalSpent(userId) {
-  try {
-    const userStats = await UserStats.findOne({ userId });
-    return userStats?.totalSpent || 0;
-  } catch (err) {
-    console.error("Erro ao buscar totalSpent:", err);
-    return 0;
-  }
-}
-
 export async function getExpensesReport(userId, days) {
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
@@ -99,8 +89,66 @@ export async function getCategoryReport(userId, days) {
   ]);
 }
 
-// Função para formatar a detalhes de despesas por categoria
-export async function getCategoryExpenses(userId, month, monthName, category) {
+export async function getExpenseDetails(userId, month, monthName, category) {
+  try {
+    // ... (a lógica de 'matchStage' e 'Expense.find' continua a mesma) ...
+    let matchStage = { userId };
+    if (category) { matchStage.category = { $regex: new RegExp(`^${category.trim()}$`, "i") }; }
+    if (month) {
+      const [year, monthNumber] = month.split("-");
+      matchStage.date = {
+        $gte: new Date(Date.UTC(parseInt(year), parseInt(monthNumber)-1, 1, 0, 0, 0)),
+        $lte: new Date(Date.UTC(parseInt(year), parseInt(monthNumber), 0, 23, 59, 59))
+      }
+    }
+    const expenses = await Expense.find(matchStage).sort({ category: 1, date: 1 }); // Ordena por categoria primeiro!
+
+    if (expenses.length === 0) { return "Nenhum gasto encontrado para este período."; }
+
+    // ==================================================================
+    // NOVA LÓGICA DE AGRUPAMENTO
+    // ==================================================================
+    
+    // Se uma categoria específica foi pedida, mantenha a lista simples
+    if (category) {
+      let message = `Detalhes dos gastos em _*${category}*_ no mês de _*${monthName}*_:\n`;
+      expenses.forEach(expense => {
+        message += `- ${expense.description}: R$ ${expense.amount.toFixed(2)}\n`;
+      });
+      return message.trimEnd();
+    }
+
+    // Se NENHUMA categoria foi pedida, agrupe os resultados
+    let message = `Detalhes de todos os gastos no mês de _*${monthName}*_:\n\n`;
+    const expensesByCategory = {};
+
+    // 1. Agrupe as despesas em um objeto
+    expenses.forEach(expense => {
+      const cat = expense.category || "Sem Categoria";
+      if (!expensesByCategory[cat]) {
+        expensesByCategory[cat] = [];
+      }
+      expensesByCategory[cat].push(`- ${expense.description}: R$ ${expense.amount.toFixed(2)}`);
+    });
+
+    // 2. Construa a mensagem a partir do objeto agrupado
+    for (const cat in expensesByCategory) {
+      message += `*${cat.charAt(0).toUpperCase() + cat.slice(1)}*\n`;
+      message += expensesByCategory[cat].join('\n');
+      message += '\n\n';
+    }
+
+    return message.trimEnd();
+
+  } catch (error) {
+    console.error("Erro ao buscar despesas por categoria:", error);
+    return "Ocorreu um erro ao buscar os gastos. Tente novamente.";
+  }
+}
+
+// Substitua também a função getIncomeDetails para corrigir o mesmo bug proativamente
+
+export async function getIncomeDetails(userId, month, monthName, category) {
   try {
     let matchStage = { userId };
 
@@ -110,55 +158,40 @@ export async function getCategoryExpenses(userId, month, monthName, category) {
 
     if (month) {
       const [year, monthNumber] = month.split("-");
-      matchStage.date= {
+      matchStage.date = {
         $gte: new Date(Date.UTC(parseInt(year), parseInt(monthNumber)-1, 1, 0, 0, 0)),
         $lte: new Date(Date.UTC(parseInt(year), parseInt(monthNumber), 0, 23, 59, 59))
       }
     }
 
-    const expenses = await Expense.find(matchStage);
-    if (expenses.length === 0) {
-      return "Nenhum gasto encontrado para este mês e categoria.";
+    const incomes = await Income.find(matchStage).sort({ date: 1 });
+
+    if (incomes.length === 0) {
+      return "Nenhuma receita encontrada para este período.";
     }
     
-    
-    let message = `Detalhes dos gastos em _*${category}*_ no mês de _*${monthName}*_:\n`;
-    expenses.forEach(expense => {
-      message += `- ${expense.description}: R$ ${expense.amount.toFixed(2)}\n`;
-    });
-    
-    return message;
-  } catch (error) { // 👈 ADICIONANDO O BLOCO CATCH
-    console.error("Erro ao buscar despesas por categoria:", error);
-    return "Ocorreu um erro ao buscar os gastos. Tente novamente.";
-  }
-}
-
-export async function getCategoryIncomes(userId, month, category) {
-  try {
-    // Montar a query para buscar as receitas do usuário no mês e categoria especificados
-    const query = {
-      userId: userId,
-      date: {
-        $gte: new Date(`${month}-01T00:00:00.000Z`),
-        $lte: new Date(`${month}-31T23:59:59.999Z`)
-      }
-    };
-
-    // Se uma categoria for especificada, adicionar ao filtro
+    // ==================================================================
+    // A MESMA CORREÇÃO APLICADA AQUI
+    // ==================================================================
+    let header;
     if (category) {
-      query.category = category;
+      // Se TEM categoria, use um cabeçalho específico
+      header = `Detalhes das receitas de _*${category}*_ no mês de _*${monthName}*_:\n`;
+    } else {
+      // Se NÃO TEM categoria, use um cabeçalho geral
+      header = `Detalhes de todas as receitas no mês de _*${monthName}*_:\n`;
     }
+    
+    let message = header;
+    incomes.forEach(income => {
+      message += `✅ ${income.description}: R$ ${income.amount.toFixed(2)}\n`;
+    });
 
-    // Buscar as receitas no banco de dados
-    const incomes = await Income.find(query);
+    return message.trimEnd();
 
-    // Retornar as receitas encontradas
-    return incomes;
   } catch (error) {
-    // Em caso de erro, registrar o erro e retornar um array vazio
-    console.error("Erro ao buscar receitas por categoria:", error);
-    return [];
+    console.error("Erro ao buscar detalhes das receitas:", error);
+    return "Ocorreu um erro ao buscar os detalhes das receitas. Tente novamente.";
   }
 }
 

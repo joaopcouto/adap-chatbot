@@ -108,36 +108,12 @@ export function sendExpenseDeletedMessage(twiml, expenseData) {
   twiml.message(`🗑️ Gasto #_${expenseData.messageId}_ removido.`);
 }
 
-export function sendTotalExpensesMessage(twiml, total, category) {
-  let message = `*Gasto total*: R$ ${total.toFixed(2)}. \n\nDigite "listagem" para receber a lista de todos os itens`;
-  if (category) {
-    message = `*Gasto total em ${category.charAt(0).toUpperCase() + category.slice(1)}*: R$ ${total.toFixed(2)}. \n\nDigite "listagem" para receber a lista de todos os itens`;
-  }
-  twiml.message(message);
-}
-
 export function sendTotalIncomeMessage(twiml, total, monthName) {
   let message = `*Receita total*: R$ ${total.toFixed(2)}`;
   if (monthName) {
     message = `*Receita total* em _*${monthName}*_: \nR$ ${total.toFixed(2)}`;
   }
   twiml.message(message);
-}
-
-export function sendTotalExpensesAllMessage(twiml, total) {
-  twiml.message(`*Gasto total*:\nR$ ${total.toFixed(2)}`);
-}
-
-export function sendTotalExpensesLastMonthsMessage(
-  twiml,
-  total,
-  monthName
-) {
-  twiml.message(
-    `*Gasto total em ${monthName}*:\nR$ ${total.toFixed(
-      2
-    )}`
-  );
 }
 
 export function sendTotalRemindersMessage(twiml, allFutureReminders) {

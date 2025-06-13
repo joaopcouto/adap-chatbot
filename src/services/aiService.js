@@ -18,9 +18,7 @@ export async function interpretMessageWithAI(message) {
       "generate_daily_chart" → The user wants to generate a daily expense chart. Extract the amount of days.  
       "generate_category_chart" → The user wants to generate a category-wise expense chart. Extract the days.
       "get_total_income" → The user wants to retrieve the total amout income.
-      "get_total" → The user wants to retrieve the total amount spent or income in a specific category
-      "get_total_all" → The user wants to retrieve the total amout income
-      "get_total_last_months" → The user wants to retrieve the total amount spent in the last months. Extract the month in two formats: "YYYY-MM" and "January 2025". If the user specify the past month, the assistant should return the total amount spent in that month.
+      "get_total" → The user wants to retrieve their total amount spent or income for a specified month, or the current month, optionally filtered by a specific category.
       "detalhes" → The user wants to show a list of all itens in a certain data"
       "greeting" → The user sends a greeting (e.g., "Oi", "Olá").
       "instructions" → The user asks how to use the assistant or what it can do.
@@ -31,9 +29,9 @@ export async function interpretMessageWithAI(message) {
       "unknown" → The message does not match any of the above intents.
   
     1a. When the intent is "get_total", extract the following information:
-      - Category: The category for which the total is requested.
-      - Month (Optional): If the user specifies a month (e.g., "em janeiro"), extract the month in the format "YYYY-MM" (e.g., "2025-01") and also extract the month name (e.g., "Janeiro"). If no month is specified, leave the month field empty.
-
+      - Category (Optional): The category for which the total is requested.
+      - Month (Optional): If the user specifies a month (e.g., "em janeiro"), extract the month in the format "YYYY-MM" and also extract the month name. If no month is specified, do not include the month fields in the data object.
+      
     1b. When the intent is "get_total_income", extract the following information:
       - Month (Optional): If the user specifies a month (e.g., "em janeiro"), extract the month in the format "YYYY-MM" (e.g., "2025-01") and also extract the month name (e.g., "Janeiro"). If no month is specified, leave the month field empty.
 
@@ -89,7 +87,7 @@ export async function interpretMessageWithAI(message) {
        Respond only with a valid JSON object without any additional formatting or explanation
      - Return a JSON object with the intent and extracted data. Use this format:
        {
-         "intent": "add_income" | "add_expense" | "add_expense_new_category" | "delete_transaction" | "generate_daily_chart" | "generate_category_chart" | "get_total_income" |"get_total" | "get_total_all" | "get_total_last_months" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "financial_help",
+         "intent": "add_income" | "add_expense" | "add_expense_new_category" | "delete_transaction" | "generate_daily_chart" | "generate_category_chart" | "get_total_income" |"get_total" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "financial_help",
          "data": {
            "amount": number,
            "description": string,
@@ -102,7 +100,7 @@ export async function interpretMessageWithAI(message) {
          }
        }
   
-  5. Examples of User Inputs & Correct Outputs:
+  5. Examples of User Inputs & Correct Outputs (if user): 
      - User: "Recebi 1000 reais de salário"
        Response: { "intent": "add_income", "data": { "amount": 1000, "description": "salário" } }
      - User: "12 lanche" 
@@ -121,26 +119,30 @@ export async function interpretMessageWithAI(message) {
        Response: { "intent": "generate_daily_chart", "data": { "days": 10}}
      - User: "ONDE foram meus gastos nos últimos 7 dias?"
        Response: { "intent": "generate_category_chart", "data": { "days": 7}}
-     - User: "Qual é o meu GASTO total em gastos fixos?"
-       Response: { "intent": "get_total", "data": { "category": "gastos fixos" } }
-     - User: "Qual é a minha RECEITA total em Renda extra?"
-       Response: { "intent": "get_total", "data": { "category": "Renda extra" } }
-     - User: "Qual é minha receita total?"
-       Response: { "intent": "get_total_income", "data": {}}
-     - User: "Qual é o meu gasto total em transporte?"
-       Response: { "intent": "get_total", "data": { "category": "transporte" } } 
+     
+     - User: "Qual é o meu gasto total?"
+       Response: { "intent": "get_total", "data": {} }
+
      - User: "Gasto total"
-       Response: { "intent": "get_total_all", "data": {} }
-     - User: "Quanto gastei no mês de fevereiro?" 
-       Response: { "intent": "get_total_last_months", "data": { "month": "2025-02", "monthName": "Fevereiro" }}
-     - User: "Qual é o meu GASTO total em gastos fixos em Junho?"
-       Response: { "intent": "get_total", "data": { "category": "gastos fixos", "monthName":"Junho", "month": "2024-06"} }
-     - User: "Qual é o meu GASTO total em Junho?"*
-       Response: { "intent": "get_total", "data": { "monthName":"Junho", "month": "2024-06"} }*
-     - User: "Qual é o meu GASTO total"*
-       Response: { "intent": "get_total", "data": { } }*
+       Response: { "intent": "get_total", "data": {} }
+       
+     - User: "Qual é a minha receita total?"
+       Response: { "intent": "get_total_income", "data": { "month": "2025-05", "monthName": "Maio" } }
+
+     - User: "Qual meu gasto total com lazer?"
+       Response: { "intent": "get_total", "data": { "category": "lazer" } }
+       
+     - User: "Qual meu gasto total com transporte em Janeiro?"
+       Response: { "intent": "get_total", "data": { "category": "transporte", "month": "2025-01", "monthName": "Janeiro" } }
+
+     - User: "Quanto gastei em fevereiro?"
+       Response: { "intent": "get_total", "data": { } }
+       
+     - User: "Me mostre a receita de Renda Extra do mês passado"
+       Response: { "intent": "get_total_income", "data": { "category": "Renda Extra", "month": "2025-04", "monthName": "Abril" } }
+       
      - User: "detalhes"
-       Response: { "intent": "detalhes", "data": { "category": "nome da categoria", "month": "2023-10" , "monthName": outubro} }
+       Response: { "intent": "detalhes", "data": {} }
      - User: "Olá!"
        Response: { "intent": "greeting", "data": {} }
      - User: "Como usar?"
