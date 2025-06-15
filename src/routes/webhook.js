@@ -157,197 +157,86 @@ router.post("/", async (req, res) => {
         break;
       }
 
-      case "add_expense": {
-        {
-          const { amount, description, category, messageId } =
-            interpretation.data;
-          devLog(amount, description, category);
-          devLog(
-            "Verificando se categoria é válida e acesso a categoria customizada..."
-          );
-
-          let finalCategory = category;
-          if (!VALID_CATEGORIES.includes(finalCategory)) {
-            finalCategory = "outro";
-          }
-
-          if (
-            VALID_CATEGORIES.includes(category) &&
-            !userHasFreeCategorization
-          ) {
-            const newExpense = new Expense({
-              userId,
-              amount,
-              description,
-              category: finalCategory,
-              date: new Date(),
-              messageId: generateId(),
-            });
-            devLog("Salvando nova despesa:", newExpense);
-            await newExpense.save();
-            devLog("Enviando mensagem de confirmação ao usuário.");
-            sendExpenseAddedMessage(twiml, newExpense);
-            await UserStats.findOneAndUpdate(
-              { userId },
-              { $inc: { totalSpent: amount } },
-              { upsert: true }
-            );
-          } else {
-            const regex = new RegExp(description, "i");
-
-            const similarExpense = await Expense.findOne({
-              userId,
-              description: { $regex: regex },
-            }).sort({ date: -1 });
-
-            if (userHasFreeCategorization && similarExpense?.category) {
-              const inferredCategory = similarExpense.category;
-
-              const newExpense = new Expense({
-                userId,
-                amount,
-                description,
-                category: inferredCategory,
-                date: new Date(),
-                messageId: generateId(),
-              });
-              devLog("Salvando nova despesa:", newExpense);
-              await newExpense.save();
-              devLog("Enviando mensagem de confirmação ao usuário.");
-              sendExpenseAddedMessage(twiml, newExpense);
-              await UserStats.findOneAndUpdate(
-                { userId },
-                { $inc: { totalSpent: amount } },
-                { upsert: true }
-              );
-            } else {
-              const newExpense = new Expense({
-                userId,
-                amount,
-                description,
-                category: finalCategory,
-                date: new Date(),
-                messageId: generateId(),
-              });
-              devLog("Salvando nova despesa:", newExpense);
-              await newExpense.save();
-              devLog("Enviando mensagem de confirmação ao usuário.");
-              sendExpenseAddedMessage(twiml, newExpense);
-              await UserStats.findOneAndUpdate(
-                { userId },
-                { $inc: { totalSpent: amount } },
-                { upsert: true }
-              );
-            }
-          }
-        }
-        break;
-      }
-
       case "add_expense_new_category": {
-        const {
-          amount: newAmount,
-          description: newDescription,
-          category: newCategory,
-          type: newType,
-          messageId,
-        } = interpretation.data;
-        devLog(newAmount, newDescription, newCategory, newType);
-        if (!(await hasAcessToFeature(userId, "add_expense_new_category"))) {
-          twiml.message(
-            "🚫 Este recurso está disponível como um complemento pago.\n\n" +
-              "🤖 Com ele, você poderá criar novas categorias personalizadas!\n\n" +
-              'Por exemplo, criar a categoria "Transporte" para registrar gastos com Uber e gasolina, ou "Fast-food" para acompanhar o quanto está indo para aquele lanche que você merece... 🍔\n\n' +
-              'Você também pode criar uma categoria como "Filho" para controlar os gastos com seu pequeno! 👶\n\n' +
-              "📌 Acesse o link para testar agora mesmo: https://pay.hotmart.com/O99171246D?bid=1746998583184\n\n" +
-              "Caso prefira, pode usar uma das 5 categorias grátis:\n" +
-              "- gastos fixos\n" +
-              "- lazer\n" +
-              "- investimento\n" +
-              "- conhecimento\n" +
-              "- doação\n\n" +
-              "✅ E agora também é possível registrar receitas!\n\n" +
-              'Basta adicionar "Recebi" antes do valor.\n\n' +
-              "É muito simples:\n\n" +
-              "- Para despesa:\n" +
-              "(Valor) (Onde) em (Categoria)\n" +
-              "Exemplo:\n" +
-              "25 mercado em gastos fixos\n\n" +
-              "- Para receita:\n" +
-              "Recebi (Valor) (De onde) em (Categoria)\n" +
-              "Exemplo:\n" +
-              "Recebi 1500 salário em investimento\n\n" +
-              "Assim, você terá controle total sobre entradas e saídas de dinheiro!"
-          );
-          break;
-        }
+        const { type } = interpretation.data;
 
-        if (newType === "income") {
-          if (!newCategory) {
-            devLog("Erro: Categoria não informada. Abortando.");
-            twiml.message(
-              "🚫 Não consegui identificar a categoria. Tente novamente."
-            );
-            break;
+        if (type === "income") {
+          devLog("Processando como nova receita...");
+          if (!(await hasAcessToFeature(userId, "add_expense_new_category"))) {
+            twiml.message("🚫 Recurso pago..."); break;
           }
-
-          if (!VALID_CATEGORIES_INCOME.includes(newCategory)) {
-            await UserStats.findOneAndUpdate(
-              { userId },
-              { $addToSet: { createdCategories: newCategory } },
-              { new: true, upsert: true }
-            );
+          const { amount, description, category } = interpretation.data;
+          if (!VALID_CATEGORIES_INCOME.includes(category)) {
+            await UserStats.findOneAndUpdate({ userId }, { $addToSet: { createdCategories: category } }, { new: true, upsert: true });
           }
-          devLog("Categoria:", newCategory);
-          const newIncome = new Income({
-            userId,
-            amount: newAmount,
-            description: newDescription,
-            category: newCategory,
-            date: new Date(),
-            messageId: generateId(),
-          });
-          devLog("Salvando nova receita:", newIncome);
+          const newIncome = new Income({ userId, amount, description, category, date: new Date(), messageId: generateId() });
           await newIncome.save();
-          devLog("Enviando mensagem de confirmação ao usuário.");
           sendIncomeAddedMessage(twiml, newIncome);
-          await UserStats.findOneAndUpdate(
-            { userId },
-            { $inc: { totalIncome: newAmount } },
-            { upsert: true }
-          );
-          break;
-        } else if (newType === "expense") {
-          if (!VALID_CATEGORIES.includes(newCategory)) {
-            await UserStats.findOneAndUpdate(
-              { userId },
-              { $addToSet: { createdCategories: newCategory } },
-              { new: true, upsert: true }
-            );
-
-            const newExpense = new Expense({
-              userId,
-              amount: newAmount,
-              description: newDescription,
-              category: newCategory,
-              date: new Date(),
-              messageId: generateId(),
-            });
-            devLog("Salvando nova despesa:", newExpense);
-            await newExpense.save();
-            devLog("Enviando mensagem de confirmação ao usuário.");
-            sendExpenseAddedMessage(twiml, newExpense);
-            await UserStats.findOneAndUpdate(
-              { userId },
-              { $inc: { totalSpent: newAmount } },
-              { upsert: true }
-            );
-          } else {
-            sendHelpMessage(twiml);
-          }
-          break;
+          await UserStats.findOneAndUpdate({ userId }, { $inc: { totalIncome: amount } }, { upsert: true });
+          break; 
         }
+        
+        devLog("Intent 'add_expense_new_category' (despesa) detectado. Caindo para a lógica unificada...");
       }
+
+      case "add_expense": {
+        let { amount, description, category: categoryFromAI } = interpretation.data;
+        let finalCategory = categoryFromAI; 
+        
+        if (!categoryFromAI) {
+          devLog(`Categoria não fornecida pela IA. Tentando inferir pelo histórico...`);
+          const similarExpense = await Expense.findOne({
+            userId,
+            description: new RegExp(`^${description}$`, 'i') 
+          }).sort({ date: -1 });
+
+          if (similarExpense) {
+            finalCategory = similarExpense.category;
+            devLog(`Categoria inferida do histórico: "${finalCategory}"`);
+          }
+        } else {
+            devLog(`Usuário especificou a categoria: "${categoryFromAI}". Esta tem prioridade.`);
+        }
+
+        const userHasCustomCategoryAccess = await hasAcessToFeature(userId, "add_expense_new_category");
+        const userStats = await UserStats.findOne({ userId });
+        const userCustomCategories = userStats?.createdCategories || [];
+
+        finalCategory = finalCategory || 'outro'; 
+        let isValidCategory = VALID_CATEGORIES.includes(finalCategory) || userCustomCategories.includes(finalCategory);
+
+        if (!isValidCategory) {
+            if (userHasCustomCategoryAccess) {
+                isValidCategory = true;
+                await UserStats.findOneAndUpdate(
+                    { userId },
+                    { $addToSet: { createdCategories: finalCategory } },
+                    { upsert: true }
+                );
+            } else {
+                twiml.message(
+                  `A categoria "${finalCategory}" não existe e você não pode criar novas no plano gratuito.\n\n` +
+                  `Seu gasto com "${description}" foi adicionado na categoria "Outro".`
+                );
+                finalCategory = "outro";
+            }
+        }
+        
+        const newExpense = new Expense({
+            userId, amount, description, category: finalCategory, date: new Date(), messageId: generateId(),
+        });
+
+        await newExpense.save();
+        devLog("Salvando nova despesa:", newExpense);
+        
+        if (isValidCategory) {
+            sendExpenseAddedMessage(twiml, newExpense);
+        }
+
+        await UserStats.findOneAndUpdate({ userId }, { $inc: { totalSpent: amount } }, { upsert: true });
+
+        break;
+    }
 
       case "delete_transaction":
         {

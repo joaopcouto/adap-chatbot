@@ -54,6 +54,7 @@ export async function interpretMessageWithAI(message) {
       THEN keep the intent as "add_expense" or "add_income" depending on the message type.
     - ELSE (if the provided category does not exactly match any of the above),
       THEN the intent MUST be "add_expense_new_category", and you must extract the category exactly as written by the user, along with the type (income or expense).
+    - If the user does not specify a category and you cannot reliably determine one from the description, the value for "category" MUST be null. DO NOT return instructional text.
 
   Valid categories for "add_expense":
   - "gastos fixos"
@@ -104,10 +105,11 @@ export async function interpretMessageWithAI(message) {
      - User: "Recebi 1000 reais de salário"
        Response: { "intent": "add_income", "data": { "amount": 1000, "description": "salário" } }
      - User: "12 lanche" 
-       Response: { intent: "add_expense", data: { amount: 12, description: "lanche", category: determine it based on the description using the valid categories } }
-      - User: "15 uber" → { intent: "add_expense", data: { amount: 15, description: "uber", category: determine it based on the  description using the valid categories  } }
-      - User: "Recebi 2000 com brigadeiro em venda" → { intent: "add_expense_new_category", data: { amount: 2000, description: "brigadeiro", category: "venda", type: "income" } }
-     - User: "Recebi 20 com freelance na categoria extras" → { intent: "add_expense_new_category", data: { amount: 20, description: "freelance", category: "extras", type: "income" } }
+       Response: { "intent": "add_expense", "data": { "amount": 12, "description": "lanche", "category": null } }
+     - User: "15 uber"
+       Response: { "intent": "add_expense", "data": { "amount": 15, "description": "uber", "category": null } }
+     - User: "Recebi 20 com freelance na categoria extras"
+       Response: { intent: "add_expense_new_category", data: { amount: 20, description: "freelance", category: "extras", type: "income" } }
      - User: "25 comida em alimentação" → { intent: "add_expense_new_category", data: { amount: 25, description: "comida", category: "alimentação", type: "expense" } }
      - User: "Gastei 50 com filmes em lazer"
        Response: { "intent": "add_expense", "data": { "amount": 50, "description": "filmes", "category": "lazer" } }
@@ -119,28 +121,20 @@ export async function interpretMessageWithAI(message) {
        Response: { "intent": "generate_daily_chart", "data": { "days": 10}}
      - User: "ONDE foram meus gastos nos últimos 7 dias?"
        Response: { "intent": "generate_category_chart", "data": { "days": 7}}
-     
      - User: "Qual é o meu gasto total?"
        Response: { "intent": "get_total", "data": {} }
-
      - User: "Gasto total"
        Response: { "intent": "get_total", "data": {} }
-       
      - User: "Qual é a minha receita total?"
        Response: { "intent": "get_total_income", "data": { "month": "2025-05", "monthName": "Maio" } }
-
      - User: "Qual meu gasto total com lazer?"
        Response: { "intent": "get_total", "data": { "category": "lazer" } }
-       
      - User: "Qual meu gasto total com transporte em Janeiro?"
        Response: { "intent": "get_total", "data": { "category": "transporte", "month": "2025-01", "monthName": "Janeiro" } }
-
      - User: "Quanto gastei em fevereiro?"
        Response: { "intent": "get_total", "data": { } }
-       
      - User: "Me mostre a receita de Renda Extra do mês passado"
        Response: { "intent": "get_total_income", "data": { "category": "Renda Extra", "month": "2025-04", "monthName": "Abril" } }
-       
      - User: "detalhes"
        Response: { "intent": "detalhes", "data": {} }
      - User: "Olá!"
