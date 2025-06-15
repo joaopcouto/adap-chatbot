@@ -3,42 +3,62 @@ import Income from "../models/Income.js";
 import Reminder from "../models/Reminder.js";
 import UserStats from "../models/UserStats.js";
 
-export async function getCurrentTotalIncome(userId) {
+export async function calculateTotalIncome(userId, month = null) {
+  let matchStage = { userId };
+
+  if (month) {
+    const [year, monthNumber] = month.split("-");
+    matchStage.$expr = {
+      $and: [
+        { $eq: [{ $year: "$date" }, parseInt(year)] },
+        { $eq: [{ $month: "$date" }, parseInt(monthNumber)] },
+      ],
+    };
+  }
+
   try {
-    const userStats = await UserStats.findOne({ userId });
-    return userStats?.totalIncome || 0;
+    const result = await Income.aggregate([
+      { $match: matchStage },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]);
+    return result.length > 0 ? result[0].total : 0;
   } catch (err) {
-    console.error("Erro ao buscar totalIncome:", err);
+    console.error("Erro ao buscar total de receita:", err);
     return 0;
   }
 }
 
-export async function calculateTotalExpenses(userId, category = null, type) {
-  const filter = category
-    ? { userId, category: { $regex: new RegExp(`^${category.trim()}$`, "i") } }
-    : { userId };
+export async function calculateTotalExpenses(
+  userId,
+  category = null,
+  month = null
+) {
+  let matchStage = { userId };
 
-  if (type === "income") {
-    const result = await Income.aggregate([
-      { $match: filter },
-      { $group: { _id: null, total: { $sum: "$amount" } } },
-    ]);
-    return result.length ? result[0].total : 0;
-  } else {
-    const result = await Expense.aggregate([
-      { $match: filter },
-      { $group: { _id: null, total: { $sum: "$amount" } } },
-    ]);
-    return result.length ? result[0].total : 0;
+  if (category) {
+    matchStage.category = { $regex: new RegExp(`^${category.trim()}$`, "i") };
   }
-}
 
-export async function getCurrentTotalSpent(userId) {
+  if (month) {
+    const [year, monthNumber] = month.split("-");
+    matchStage.date = {
+      $gte: new Date(
+        Date.UTC(parseInt(year), parseInt(monthNumber) - 1, 1, 0, 0, 0)
+      ),
+      $lte: new Date(
+        Date.UTC(parseInt(year), parseInt(monthNumber), 0, 23, 59, 59)
+      ),
+    };
+  }
+
   try {
-    const userStats = await UserStats.findOne({ userId });
-    return userStats?.totalSpent || 0;
+    const result = await Expense.aggregate([
+      { $match: matchStage },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]);
+    return result.length > 0 ? result[0].total : 0;
   } catch (err) {
-    console.error("Erro ao buscar totalSpent:", err);
+    console.error("Erro ao buscar total de gastos:", err);
     return 0;
   }
 }
@@ -76,6 +96,115 @@ export async function getCategoryReport(userId, days) {
   ]);
 }
 
+export async function getExpenseDetails(userId, month, monthName, category) {
+  try {
+    let matchStage = { userId };
+    if (category) {
+      matchStage.category = { $regex: new RegExp(`^${category.trim()}$`, "i") };
+    }
+    if (month) {
+      const [year, monthNumber] = month.split("-");
+      matchStage.date = {
+        $gte: new Date(
+          Date.UTC(parseInt(year), parseInt(monthNumber) - 1, 1, 0, 0, 0)
+        ),
+        $lte: new Date(
+          Date.UTC(parseInt(year), parseInt(monthNumber), 0, 23, 59, 59)
+        ),
+      };
+    }
+    const expenses = await Expense.find(matchStage).sort({
+      category: 1,
+      date: 1,
+    });
+
+    if (expenses.length === 0) {
+      return "Nenhum gasto encontrado para este período.";
+    }
+
+    if (category) {
+      let message = `🧾 Detalhes dos gastos em _*${category}*_ no mês de _*${monthName}*_:\n`;
+      expenses.forEach((expense) => {
+        message += `   💸 ${expense.description}: R$ ${expense.amount.toFixed(
+          2
+        )} \n`;
+      });
+      return message.trimEnd();
+    }
+
+    let message = `🧾 Detalhes de todos os gastos no mês de _*${monthName}*_:\n\n`;
+    const expensesByCategory = {};
+
+    expenses.forEach((expense) => {
+      const cat = expense.category || "Sem Categoria";
+      if (!expensesByCategory[cat]) {
+        expensesByCategory[cat] = [];
+      }
+      expensesByCategory[cat].push(
+        `   💸 ${expense.description}: R$ ${expense.amount.toFixed(2)}`
+      );
+    });
+
+    for (const cat in expensesByCategory) {
+      message += `📁 *${cat.charAt(0).toUpperCase() + cat.slice(1)}*\n`;
+      message += expensesByCategory[cat].join("\n");
+      message += "\n\n";
+    }
+
+    return message.trimEnd();
+  } catch (error) {
+    console.error("Erro ao buscar despesas por categoria:", error);
+    return "Ocorreu um erro ao buscar os gastos. Tente novamente.";
+  }
+}
+
+export async function getIncomeDetails(userId, month, monthName, category) {
+  try {
+    let matchStage = { userId };
+
+    if (category) {
+      matchStage.category = { $regex: new RegExp(`^${category.trim()}$`, "i") };
+    }
+
+    if (month) {
+      const [year, monthNumber] = month.split("-");
+      matchStage.date = {
+        $gte: new Date(
+          Date.UTC(parseInt(year), parseInt(monthNumber) - 1, 1, 0, 0, 0)
+        ),
+        $lte: new Date(
+          Date.UTC(parseInt(year), parseInt(monthNumber), 0, 23, 59, 59)
+        ),
+      };
+    }
+
+    const incomes = await Income.find(matchStage).sort({ date: 1 });
+
+    if (incomes.length === 0) {
+      return "Nenhuma receita encontrada para este período.";
+    }
+
+    let header;
+    if (category) {
+      header = `🧾 Detalhes das receitas de _*${category}*_ no mês de _*${monthName}*_:\n`;
+    } else {
+      header = `🧾 Detalhes de todas as receitas no mês de _*${monthName}*_:\n`;
+    }
+
+    let message = header;
+    incomes.forEach((income) => {
+      message += `   💰 ${income.description}: R$ ${income.amount.toFixed(
+        2
+      )}\n`;
+    });
+
+    return message.trimEnd();
+  } catch (error) {
+    console.error("Erro ao buscar detalhes das receitas:", error);
+    return "Ocorreu um erro ao buscar os detalhes das receitas. Tente novamente.";
+  }
+}
+
 export async function getTotalReminders(userId) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -105,7 +234,8 @@ export async function getTotalReminders(userId) {
       const formattedDate = dateObj.toLocaleDateString("pt-BR");
       const messageCode = r.messageId ? `#${r.messageId}` : "";
       return `🗓️ ${r.description.toUpperCase()} - ${formattedDate} - ${messageCode}`;
-    }).join("\n\n");
+    })
+    .join("\n\n");
 
   return allFutureReminders;
 }

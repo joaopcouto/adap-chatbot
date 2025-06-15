@@ -12,13 +12,14 @@ Fui criada para te ajudar a organizar suas finanças de forma simples, direto po
 Comigo, você consegue:
 
 1️⃣ Anotar seus gastos e receitas em segundos
-2️⃣   Anotar seus lembretes e compromissos de forma simples
+2️⃣ Anotar seus lembretes e compromissos de forma simples
 3️⃣ Acompanhar seus gastos por categoria (Lazer, Gastos fixos, etc.)
 4️⃣ Acompanhar seu gasto ou receita total
 5️⃣ Simples de remover um gasto caso anote errado
-6️⃣ Gerar relatório de gastos por dia da semana
-7️⃣ Gerar relatório de gastos por categoria
-8️⃣ Dicas financeiras para o seu dia a dia
+6️⃣ Gerar gráfico de gastos dos últimos 7 dias
+7️⃣ Gerar gráfico de gastos por categoria
+8️⃣ Gerar relatórios de gastos e receitas, filtrando ou não por categoria
+9️⃣ Dicas financeiras para o seu dia a dia
 
 E tudo isso de forma automática. É só me mandar mensagens simples como:
 
@@ -28,13 +29,14 @@ E tudo isso de forma automática. É só me mandar mensagens simples como:
 4️⃣ "gasto total" ou "receita total"
 5️⃣ "remover #(código do gasto/receita)"
 6️⃣ "quanto gastei nos últimos 7 dias"
-7️⃣ "onde foram meus gastos nos últimos 7 dias"
-8️⃣ "onde posso deixar meu dinheiro para render mais?"
+7️⃣ "onde foram meus gastos nos últimos 30 dias?"
+8️⃣ "qual meu gasto total em lazer?" ou "qual minha receita total em junho?"
+9️⃣ "onde posso deixar meu dinheiro para render mais?"
 
 
 🔐 Seus dados são 100% seguros e privados.
 
-Ah, e aproveita pra me seguir no Instagram também: @economia.em.30seg
+Ah, e aproveita pra nos seguir no Instagram também: @adapfinanceira
 
 Lá tem dicas diárias pra você gastar melhor e fazer seu dinheiro render mais! 🚀`);
 }
@@ -47,14 +49,14 @@ Fui criada para te ajudar a organizar suas finanças de forma simples, direto po
 Comigo, você consegue:
 
 1️⃣ Anotar seus gastos e receitas em segundos
-1️⃣ Anotar seus gastos e receitas em segundos
-2️⃣   Anotar seus lembretes e compromissos de forma simples
+2️⃣ Anotar seus lembretes e compromissos de forma simples
 3️⃣ Acompanhar seus gastos por categoria (Lazer, Gastos fixos, etc.)
 4️⃣ Acompanhar seu gasto ou receita total
 5️⃣ Simples de remover um gasto caso anote errado
-6️⃣ Gerar relatório de gastos por dia da semana
-7️⃣ Gerar relatório de gastos por categoria
-8️⃣ Dicas financeiras para o seu dia a dia
+6️⃣ Gerar gráfico de gastos dos últimos 7 dias
+7️⃣ Gerar gráfico de gastos por categoria
+8️⃣ Gerar relatórios de gastos e receitas, filtrando ou não por categoria
+9️⃣ Dicas financeiras para o seu dia a dia
 
 E tudo isso de forma automática. É só me mandar mensagens simples como:
 
@@ -64,13 +66,14 @@ E tudo isso de forma automática. É só me mandar mensagens simples como:
 4️⃣ "gasto total" ou "receita total"
 5️⃣ "remover #(código do gasto/receita)"
 6️⃣ "quanto gastei nos últimos 7 dias"
-7️⃣ "onde foram meus gastos nos últimos 7 dias"
-8️⃣ "onde posso deixar meu dinheiro para render mais?"
+7️⃣ "onde foram meus gastos nos últimos 30 dias?"
+8️⃣ "qual meu gasto total em lazer?" ou "qual minha receita total em junho?"
+9️⃣ "onde posso deixar meu dinheiro para render mais?"
 
 
 🔐 Seus dados são 100% seguros e privados.
 
-Ah, e aproveita pra me seguir no Instagram também: @economia.em.30seg
+Ah, e aproveita pra nos seguir no Instagram também: @adapfinanceira
 
 Lá tem dicas diárias pra você gastar melhor e fazer seu dinheiro render mais! 🚀`);
 }
@@ -108,34 +111,12 @@ export function sendExpenseDeletedMessage(twiml, expenseData) {
   twiml.message(`🗑️ Gasto #_${expenseData.messageId}_ removido.`);
 }
 
-export function sendTotalExpensesMessage(twiml, total, category, type) {
-  const categoryMessage = category
-    ? ` em _*${category.charAt(0).toUpperCase() + category.slice(1)}*_`
-    : "";
-  const typeLabel = type === "income" ? "Receita" : "Gasto";
-  twiml.message(
-    `*${typeLabel} total*${categoryMessage}:\nR$ ${total.toFixed(2)}`
-  );
-}
-
-export function sendTotalIncomeMessage(twiml, total) {
-  twiml.message(`*Receita total*:\nR$ ${total.toFixed(2)}`);
-}
-
-export function sendTotalExpensesAllMessage(twiml, total) {
-  twiml.message(`*Gasto total*:\nR$ ${total.toFixed(2)}`);
-}
-
-export function sendTotalExpensesLastMonthsMessage(
-  twiml,
-  spendingHistoryLastMonths,
-  monthName
-) {
-  twiml.message(
-    `*Gasto total em ${monthName}*:\nR$ ${spendingHistoryLastMonths[0].total.toFixed(
-      2
-    )}`
-  );
+export function sendTotalIncomeMessage(twiml, total, monthName) {
+  let message = `*Receita total*: R$ ${total.toFixed(2)}`;
+  if (monthName) {
+    message = `*Receita total* em _*${monthName}*_: \nR$ ${total.toFixed(2)}`;
+  }
+  twiml.message(message);
 }
 
 export function sendTotalRemindersMessage(twiml, allFutureReminders) {
@@ -158,9 +139,8 @@ export async function sendReminderMessage(twiml, message, reminderData) {
   twiml.message(response.choices[0].message.content);
 }
 
-export function sendReminderDeletedMessage(twiml, reminderData){
+export function sendReminderDeletedMessage(twiml, reminderData) {
   twiml.message(`🗑️ Lembrete #_${reminderData.messageId}_ removido.`);
-
 }
 
 export async function sendFinancialHelpMessage(twiml, message) {
