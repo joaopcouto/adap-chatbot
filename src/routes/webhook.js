@@ -9,7 +9,7 @@ import {
   getCategoryReport,
   getTotalReminders,
   getExpenseDetails,
-  getIncomeDetails
+  getIncomeDetails,
 } from "../helpers/totalUtils.js";
 import {
   generateChart,
@@ -48,7 +48,7 @@ router.post("/", async (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
   const userMessage = req.body.Body;
   const userId = req.body.From;
-  console.log(userId);
+  devLog(userId);
 
   const previousData = conversationState[userId]; //variavel estado da conversa para detalhes
   const userStats = await UserStats.findOne({ userId }, { blocked: 1 });
@@ -70,22 +70,25 @@ router.post("/", async (req, res) => {
     devLog("intent:" + interpretation.intent);
 
     // Salvar o estado da conversa
-    conversationState[userId] = {...previousData, ...interpretation.data}; //spred e mantendo valores das variaveis originais
+    conversationState[userId] = { ...previousData, ...interpretation.data }; //spred e mantendo valores das variaveis originais
 
     switch (interpretation.intent) {
       case "add_income": {
-        const { amount, description, category, messageId } = interpretation.data;
+        const { amount, description, category, messageId } =
+          interpretation.data;
         devLog(amount, description, category);
 
         let finalCategory = category || "outro";
         if (
-          !VALID_CATEGORIES_INCOME.includes(finalCategory) && !userHasFreeCategorization
+          !VALID_CATEGORIES_INCOME.includes(finalCategory) &&
+          !userHasFreeCategorization
         ) {
           finalCategory = "outro";
         }
 
         if (
-          VALID_CATEGORIES_INCOME.includes(finalCategory) && !userHasFreeCategorization
+          VALID_CATEGORIES_INCOME.includes(finalCategory) &&
+          !userHasFreeCategorization
         ) {
           const newIncome = new Income({
             userId,
@@ -239,7 +242,7 @@ router.post("/", async (req, res) => {
           }
         }
         break;
-      } 
+      }
 
       case "add_expense_new_category": {
         const {
@@ -295,7 +298,7 @@ router.post("/", async (req, res) => {
               { new: true, upsert: true }
             );
           }
-          console.log("Categoria:", newCategory);
+          devLog("Categoria:", newCategory);
           const newIncome = new Income({
             userId,
             amount: newAmount,
@@ -462,39 +465,44 @@ router.post("/", async (req, res) => {
 
       case "get_total": {
         let { category, month, monthName } = interpretation.data;
-        
+
         // Lógica de fallback para o mês atual (mantida)
         if (!month || !monthName) {
           const now = new Date();
           const currentYear = now.getFullYear();
-          const currentMonth = String(now.getMonth() + 1).padStart(2, '0'); 
+          const currentMonth = String(now.getMonth() + 1).padStart(2, "0");
           month = `${currentYear}-${currentMonth}`;
-          const monthNameRaw = now.toLocaleString('pt-BR', { month: 'long' });
-          monthName = monthNameRaw.charAt(0).toUpperCase() + monthNameRaw.slice(1);
+          const monthNameRaw = now.toLocaleString("pt-BR", { month: "long" });
+          monthName =
+            monthNameRaw.charAt(0).toUpperCase() + monthNameRaw.slice(1);
         }
 
         const total = await calculateTotalExpenses(userId, category, month);
 
         let responseMessage;
         if (category) {
-          responseMessage = `*Gasto total* em _*${category.charAt(0).toUpperCase() + category.slice(1)}*_ no mês de _*${monthName}*_: \nR$ ${total.toFixed(2)}`;
+          responseMessage = `📉 Gasto total* em _*${
+            category.charAt(0).toUpperCase() + category.slice(1)
+          }*_ no mês de _*${monthName}*_: \nR$ ${total.toFixed(2)}`;
         } else {
-          responseMessage = `*Gasto total* no mês de _*${monthName}*_: \nR$ ${total.toFixed(2)}`;
+          responseMessage = `📉 Gasto total* no mês de _*${monthName}*_: \nR$ ${total.toFixed(
+            2
+          )}`;
         }
 
         if (total > 0) {
           responseMessage += `.\n\nDigite "detalhes" para ver a lista de itens.`;
-          
-          conversationState[userId] = { 
-              type: "expense",
-              category, 
-              month,
-              monthName
+
+          conversationState[userId] = {
+            type: "expense",
+            category,
+            month,
+            monthName,
           };
         }
-        
+
         twiml.message(responseMessage);
-        
+
         break;
       }
 
@@ -502,34 +510,39 @@ router.post("/", async (req, res) => {
         let { category, month, monthName } = interpretation.data;
 
         if (!month || !monthName) {
-            const now = new Date();
-            const currentYear = now.getFullYear();
-            const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
-            month = `${currentYear}-${currentMonth}`;
-            const monthNameRaw = now.toLocaleString('pt-BR', { month: 'long' });
-            monthName = monthNameRaw.charAt(0).toUpperCase() + monthNameRaw.slice(1);
+          const now = new Date();
+          const currentYear = now.getFullYear();
+          const currentMonth = String(now.getMonth() + 1).padStart(2, "0");
+          month = `${currentYear}-${currentMonth}`;
+          const monthNameRaw = now.toLocaleString("pt-BR", { month: "long" });
+          monthName =
+            monthNameRaw.charAt(0).toUpperCase() + monthNameRaw.slice(1);
         }
 
         const totalIncome = await calculateTotalIncome(userId, month, category);
-        
+
         let responseMessage;
         if (category) {
-            responseMessage = `*Receita total* de _*${category.charAt(0).toUpperCase() + category.slice(1)}*_ no mês de _*${monthName}*_: \nR$ ${totalIncome.toFixed(2)}`;
+          responseMessage = `📈 Receita total* de _*${
+            category.charAt(0).toUpperCase() + category.slice(1)
+          }*_ no mês de _*${monthName}*_: \nR$ ${totalIncome.toFixed(2)}`;
         } else {
-            responseMessage = `*Receita total* no mês de _*${monthName}*_: \nR$ ${totalIncome.toFixed(2)}`;
+          responseMessage = `📈 Receita total* no mês de _*${monthName}*_: \nR$ ${totalIncome.toFixed(
+            2
+          )}`;
         }
-        
+
         if (totalIncome > 0) {
-            responseMessage += `.\n\nDigite "detalhes" para ver a lista de itens.`;
-            
-            conversationState[userId] = { 
-                type: "income",
-                category,
-                month, 
-                monthName 
-            };
+          responseMessage += `.\n\nDigite "detalhes" para ver a lista de itens.`;
+
+          conversationState[userId] = {
+            type: "income",
+            category,
+            month,
+            monthName,
+          };
         }
-        
+
         twiml.message(responseMessage);
         break;
       }
@@ -539,37 +552,49 @@ router.post("/", async (req, res) => {
 
         // Adicionada verificação de 'type' para maior robustez
         if (!previousData || !previousData.type || !previousData.month) {
-          twiml.message("🚫 Não há um relatório recente para detalhar. Por favor, peça um total de gastos ou receitas primeiro.");
+          twiml.message(
+            "🚫 Não há um relatório recente para detalhar. Por favor, peça um total de gastos ou receitas primeiro."
+          );
           break;
         }
 
         // ALTERADO: Agora extraímos o 'type' do contexto!
         const { type, category, month, monthName } = previousData;
-        
-        console.log("Iniciando 'detalhes' com o contexto salvo:", previousData);
+
+        devLog("Iniciando 'detalhes' com o contexto salvo:", previousData);
 
         let detalhesMessage; // Variável para armazenar a mensagem final
 
         // ALTERADO: Lógica condicional baseada no 'type'
-        if (type === 'income') {
-            // Se o tipo for 'income', chama a função de detalhes de RECEITA
-            console.log("Chamando getIncomeDetails...");
-            detalhesMessage = await getIncomeDetails(userId, month, monthName, category);
+        if (type === "income") {
+          // Se o tipo for 'income', chama a função de detalhes de RECEITA
+          devLog("Chamando getIncomeDetails...");
+          detalhesMessage = await getIncomeDetails(
+            userId,
+            month,
+            monthName,
+            category
+          );
         } else {
-            // Caso contrário (será 'expense'), chama a função de detalhes de DESPESA
-            console.log("Chamando getExpenseDetails...");
-            detalhesMessage = await getExpenseDetails(userId, month, monthName, category);
+          // Caso contrário (será 'expense'), chama a função de detalhes de DESPESA
+          devLog("Chamando getExpenseDetails...");
+          detalhesMessage = await getExpenseDetails(
+            userId,
+            month,
+            monthName,
+            category
+          );
         }
-        
+
         twiml.message(detalhesMessage);
-        
+
         // Limpa o estado após o uso bem-sucedido
-        delete conversationState[userId]; 
+        delete conversationState[userId];
 
         break;
       }
-      
-      case "greeting":{
+
+      case "greeting": {
         sendGreetingMessage(twiml);
         break;
       }
