@@ -481,11 +481,11 @@ router.post("/", async (req, res) => {
 
         let responseMessage;
         if (category) {
-          responseMessage = `📉 Gasto total* em _*${
+          responseMessage = `📉 *Gasto total* em _*${
             category.charAt(0).toUpperCase() + category.slice(1)
           }*_ no mês de _*${monthName}*_: \nR$ ${total.toFixed(2)}`;
         } else {
-          responseMessage = `📉 Gasto total* no mês de _*${monthName}*_: \nR$ ${total.toFixed(
+          responseMessage = `📉 *Gasto total* no mês de _*${monthName}*_: \nR$ ${total.toFixed(
             2
           )}`;
         }
@@ -523,11 +523,11 @@ router.post("/", async (req, res) => {
 
         let responseMessage;
         if (category) {
-          responseMessage = `📈 Receita total* de _*${
+          responseMessage = `📈 *Receita total* de _*${
             category.charAt(0).toUpperCase() + category.slice(1)
           }*_ no mês de _*${monthName}*_: \nR$ ${totalIncome.toFixed(2)}`;
         } else {
-          responseMessage = `📈 Receita total* no mês de _*${monthName}*_: \nR$ ${totalIncome.toFixed(
+          responseMessage = `📈 *Receita total* no mês de _*${monthName}*_: \nR$ ${totalIncome.toFixed(
             2
           )}`;
         }
