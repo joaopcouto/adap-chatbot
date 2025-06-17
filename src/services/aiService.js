@@ -14,6 +14,9 @@ export async function interpretMessageWithAI(message) {
       "add_income" → The user wants to log an income. Extract the amount, description, and category. 
       "add_expense" → The user wants to log an expense. Extract the amount, description, and category.
       "add_expense_new_category" → The user wants to log an transaction (income or expense) with a new category. Extract the amount, description, category, and type.
+      "add_installment_expense" → The user wants to log an expense in installments. Extract the installment amount, description, category and number of installments.
+      "cancel_installment_purchase" → The user wants to cancel an installment purchase. Extract the purchaseId.
+      "list_active_installments" → The user wants to see a list of their active installment plans.
       "delete_transaction" → The user wants to delete an expense. Extract the messageId.
       "generate_daily_chart" → The user wants to generate a daily expense chart. Extract the amount of days.  
       "generate_category_chart" → The user wants to generate a category-wise expense chart. Extract the days.
@@ -88,11 +91,14 @@ export async function interpretMessageWithAI(message) {
        Respond only with a valid JSON object without any additional formatting or explanation
      - Return a JSON object with the intent and extracted data. Use this format:
        {
-         "intent": "add_income" | "add_expense" | "add_expense_new_category" | "delete_transaction" | "generate_daily_chart" | "generate_category_chart" | "get_total_income" |"get_total" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "financial_help",
+         "intent": "add_income" | "add_expense_new_category" | "add_expense" | "add_installment_expense" | "cancel_installment_purchase" | "cancel_installment_purchase" | "delete_transaction" | "generate_daily_chart" | "generate_category_chart" | "get_total_income" | "get_total" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "financial_help",
          "data": {
            "amount": number,
            "description": string,
            "category": string,
+           "installmentAmount": number,
+           "installments": number,
+           "purchaseId": string,
            "messageId": string,
            "days": number,
            "month": string,
@@ -115,6 +121,22 @@ export async function interpretMessageWithAI(message) {
        Response: { "intent": "add_expense", "data": { "amount": 50, "description": "filmes", "category": "lazer" } }
      - User: "Gastei 20 com uber em transporte"
        Response: { "intent": "add_expense_new_category", "data": { "amount": 20, "description": "uber", "category": "transporte" } }
+     - User: "ps5 em 10x de 400"
+       Response: { "intent": "add_installment_expense", "data": { "installmentAmount": 400, "description": "ps5", "installments": 10, "category": null } }
+     - User: "10x de 50 no curso de inglês em conhecimento"
+       Response: { "intent": "add_installment_expense", "data": { "installmentAmount": 50, "description": "curso de inglês", "installments": 10, "category": "conhecimento" } }
+     - User: "Parcelei um fone em 3 vezes de 50"
+       Response: { "intent": "add_installment_expense", "data": { "installmentAmount": 50, "description": "fone", "installments": 3, "category": null } }
+     - User: "Comprei um monitor em 4 parcelas de 100 reais na categoria trabalho"
+       Response: { "intent": "add_installment_expense", "data": { "installmentAmount": 100, "description": "monitor", "installments": 4, "category": "trabalho" } }
+     - User: "Cancelar compra #4e1b1"
+       Response: { "intent": "cancel_installment_purchase", "data": { "purchaseId": "4e1b1" } }
+     - User: "Quero cancelar o parcelamento #d90f6"
+       Response: { "intent": "cancel_installment_purchase", "data": { "purchaseId": "d90f6" } }
+     - User: "minhas compras parcelas"
+       Response: { "intent": "list_active_installments", "data": {} }
+     - User: "quais compras parceladas eu tenho?"
+       Response: { "intent": "list_active_installments", "data": {} }
      - User: "Remover gasto #4cdc9"
        Response: { "intent": "delete_transaction", "data": { messageId: 4cdc9 } }
      - User: "QUAIS foram meus gastos nos últimos 10 dias?"

@@ -103,6 +103,20 @@ export function sendExpenseAddedMessage(twiml, expenseData) {
   );
 }
 
+export function formatInstallmentNotificationMessage(expense) {
+  const formattedDate = new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Sao_Paulo' }).format(expense.date);
+  const description = expense.description.toUpperCase();
+  const category = expense.category.charAt(0).toUpperCase() + expense.category.slice(1);
+  const amount = expense.amount.toFixed(2).replace('.', ',');
+
+  const message = `📝 *Parcela Registrada*\n\n` +
+                  `📌 ${description} (${category})\n` +
+                  `💰 R$ ${amount}\n\n` +
+                  `🗓️ ${formattedDate} - Lançamento automático`;
+                  
+  return message;
+}
+
 export function sendIncomeDeletedMessage(twiml, incomeData) {
   twiml.message(`🗑️ Receita #_${incomeData.messageId}_ removida.`);
 }
