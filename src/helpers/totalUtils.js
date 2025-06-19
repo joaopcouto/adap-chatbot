@@ -2,17 +2,13 @@ import Expense from "../models/Expense.js";
 import Income from "../models/Income.js";
 import Reminder from "../models/Reminder.js";
 import UserStats from "../models/UserStats.js";
-import { TIMEZONE } from "../utils/dateUtils.js"; // Importe a constante de timezone
-import { formatInBrazil } from "../utils/dateUtils.js"; // IMPORTAR a nossa função helper de data
+import { TIMEZONE } from "../utils/dateUtils.js"; 
+import { formatInBrazil } from "../utils/dateUtils.js"; 
 
-// Função refatorada para usar timezone na query
 export async function calculateTotalIncome(userId, month = null) {
   let matchStage = { userId };
 
   if (month) {
-    // Usamos $expr para comparar o resultado de uma operação no documento.
-    // Convertemos a data do BD para string no formato 'YYYY-MM' no fuso de SP
-    // e comparamos com o mês solicitado.
     matchStage.$expr = {
       $eq: [
         { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } },
@@ -33,7 +29,6 @@ export async function calculateTotalIncome(userId, month = null) {
   }
 }
 
-// Função refatorada para usar timezone na query
 export async function calculateTotalExpenses(
   userId,
   category = null,
@@ -46,8 +41,6 @@ export async function calculateTotalExpenses(
   }
 
   if (month) {
-    // A mesma lógica da receita se aplica aqui.
-    // Se tivermos categoria e mês, o $match terá as duas condições.
     matchStage.$expr = {
       $eq: [
         { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } },
@@ -68,10 +61,7 @@ export async function calculateTotalExpenses(
   }
 }
 
-// Função refatorada para agrupar por dia no fuso horário correto
 export async function getExpensesReport(userId, days) {
-  // Criamos uma data de início apenas para otimizar, para não escanear a coleção inteira.
-  // Pegamos um dia a mais de 'gordura' para garantir que não vamos perder nada na borda do fuso horário.
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - (days + 1));
 
@@ -79,33 +69,27 @@ export async function getExpensesReport(userId, days) {
     { $match: { userId, date: { $gte: startDate } } },
     {
       $group: {
-        // A mágica acontece aqui: agrupamos pela data convertida para o fuso de SP.
         _id: { $dateToString: { format: "%Y-%m-%d", date: "$date", timezone: TIMEZONE } },
         total: { $sum: "$amount" },
       },
     },
-    { $sort: { _id: 1 } }, // Ordena pela string de data, que funciona corretamente (YYYY-MM-DD)
-    { $limit: days } // Limitamos ao número de dias que o usuário pediu
+    { $sort: { _id: 1 } }, 
+    { $limit: days } 
   ]);
 }
 
-// Função refatorada para considerar o período correto
 export async function getCategoryReport(userId, days) {
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - (days + 1));
   
-  // Pegar a data de hoje no fuso de SP para a comparação
-  const todayInBrazil = new Date().toLocaleDateString('en-CA', { timeZone: TIMEZONE }); // 'en-CA' dá o formato YYYY-MM-DD
+  const todayInBrazil = new Date().toLocaleDateString('en-CA', { timeZone: TIMEZONE }); 
 
   return Expense.aggregate([
-    // Filtro inicial otimizado
     { $match: { userId, date: { $gte: startDate } } },
-    // Adiciona um campo com a data convertida
     { $addFields: {
         brazilDateStr: { $dateToString: { format: "%Y-%m-%d", date: "$date", timezone: TIMEZONE } }
       }
     },
-    // Filtra para garantir que estamos apenas nos últimos 'days' dias do Brasil
     { $match: {
         brazilDateStr: { $lte: todayInBrazil }
       }
@@ -119,7 +103,6 @@ export async function getCategoryReport(userId, days) {
   ]);
 }
 
-// Função refatorada para buscar detalhes com base no mês do Brasil
 export async function getExpenseDetails(userId, month, monthName, category) {
   try {
     let matchStage = { userId };
@@ -137,7 +120,6 @@ export async function getExpenseDetails(userId, month, monthName, category) {
       };
     }
     
-    // O .find() não suporta $expr, então precisamos usar .aggregate()
     const expenses = await Expense.aggregate([
       { $match: matchStage },
       { $sort: { category: 1, date: 1 } }
@@ -147,8 +129,6 @@ export async function getExpenseDetails(userId, month, monthName, category) {
       return "Nenhum gasto encontrado para este período.";
     }
 
-    // O resto da sua lógica de formatação da mensagem continua igual e funcionará
-    // ... (código de formatação omitido por brevidade, é o mesmo que você já tem)
     if (category) {
       let message = `🧾 Detalhes dos gastos em _*${category}*_ no mês de _*${monthName}*_:\n`;
       expenses.forEach((expense) => {
@@ -186,7 +166,6 @@ export async function getExpenseDetails(userId, month, monthName, category) {
   }
 }
 
-// Função refatorada para buscar detalhes com base no mês do Brasil
 export async function getIncomeDetails(userId, month, monthName, category) {
   try {
     let matchStage = { userId };
@@ -213,8 +192,6 @@ export async function getIncomeDetails(userId, month, monthName, category) {
       return "Nenhuma receita encontrada para este período.";
     }
     
-    // O resto da sua lógica de formatação da mensagem continua igual
-    // ... (código de formatação omitido por brevidade)
     let header;
     if (category) {
       header = `🧾 Detalhes das receitas de _*${category}*_ no mês de _*${monthName}*_:\n`;
@@ -236,14 +213,10 @@ export async function getIncomeDetails(userId, month, monthName, category) {
   }
 }
 
-// A função de lembretes já parece lidar bem com a formatação na exibição.
-// O ajuste no `getTotalReminders` já está bom.
 export async function getTotalReminders(userId) {
-  // Esta função já formata na saída, o que é bom.
-  // Vamos apenas garantir que a conversão seja explícita.
   const allFutureRemindersArray = await Reminder.find({
     userId,
-    date: { $gte: new Date() }, // Podemos simplificar
+    date: { $gte: new Date() },
   }).sort({ date: 'asc' });
 
   if (allFutureRemindersArray.length === 0) {
@@ -252,7 +225,6 @@ export async function getTotalReminders(userId) {
 
   const allFutureReminders = allFutureRemindersArray
     .map((r) => {
-      // Usamos nossa função helper para garantir consistência
       const formattedDate = formatInBrazil(r.date); 
       const messageCode = r.messageId ? `#_${r.messageId}_` : "";
       return `🗓️ ${r.description.toUpperCase()} - *${formattedDate}* ${messageCode}`;
