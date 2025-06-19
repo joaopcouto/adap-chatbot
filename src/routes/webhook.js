@@ -41,7 +41,6 @@ import Reminder from "../models/Reminder.js";
 
 const router = express.Router();
 
-// Variável para armazenar o estado da conversa
 let conversationState = {};
 
 router.post("/", async (req, res) => {
@@ -50,7 +49,7 @@ router.post("/", async (req, res) => {
   const userId = req.body.From;
   devLog(userId);
 
-  const previousData = conversationState[userId]; //variavel estado da conversa para detalhes
+  const previousData = conversationState[userId];
   const userStats = await UserStats.findOne({ userId }, { blocked: 1 });
 
   if (userStats?.blocked) {
@@ -69,8 +68,7 @@ router.post("/", async (req, res) => {
     );
     devLog("intent:" + interpretation.intent);
 
-    // Salvar o estado da conversa
-    conversationState[userId] = { ...previousData, ...interpretation.data }; //spred e mantendo valores das variaveis originais
+    conversationState[userId] = { ...previousData, ...interpretation.data };
 
     switch (interpretation.intent) {
       case "add_income": {
@@ -164,54 +162,77 @@ router.post("/", async (req, res) => {
           devLog("Processando como nova receita...");
           if (!(await hasAcessToFeature(userId, "add_expense_new_category"))) {
             twiml.message(
-            "🚫 Este recurso está disponível como um complemento pago.\n\n" +
-              "🤖 Com ele, você poderá criar novas categorias personalizadas!\n\n" +
-              'Por exemplo, criar a categoria "Transporte" para registrar gastos com Uber e gasolina, ou "Fast-food" para acompanhar o quanto está indo para aquele lanche que você merece... 🍔\n\n' +
-              'Você também pode criar uma categoria como "Filho" para controlar os gastos com seu pequeno! 👶\n\n' +
-              "📌 Acesse o link para testar agora mesmo: https://pay.hotmart.com/O99171246D?bid=1746998583184\n\n" +
-              "Caso prefira, pode usar uma das 5 categorias grátis:\n" +
-              "- gastos fixos\n" +
-              "- lazer\n" +
-              "- investimento\n" +
-              "- conhecimento\n" +
-              "- doação\n\n" +
-              "✅ E agora também é possível registrar receitas!\n\n" +
-              'Basta adicionar "Recebi" antes do valor.\n\n' +
-              "É muito simples:\n\n" +
-              "- Para despesa:\n" +
-              "(Valor) (Onde) em (Categoria)\n" +
-              "Exemplo:\n" +
-              "25 mercado em gastos fixos\n\n" +
-              "- Para receita:\n" +
-              "Recebi (Valor) (De onde) em (Categoria)\n" +
-              "Exemplo:\n" +
-              "Recebi 1500 salário em investimento\n\n" +
-              "Assim, você terá controle total sobre entradas e saídas de dinheiro!"
-          );
+              "🚫 Este recurso está disponível como um complemento pago.\n\n" +
+                "🤖 Com ele, você poderá criar novas categorias personalizadas!\n\n" +
+                'Por exemplo, criar a categoria "Transporte" para registrar gastos com Uber e gasolina, ou "Fast-food" para acompanhar o quanto está indo para aquele lanche que você merece... 🍔\n\n' +
+                'Você também pode criar uma categoria como "Filho" para controlar os gastos com seu pequeno! 👶\n\n' +
+                "📌 Acesse o link para testar agora mesmo: https://pay.hotmart.com/O99171246D?bid=1746998583184\n\n" +
+                "Caso prefira, pode usar uma das 5 categorias grátis:\n" +
+                "- gastos fixos\n" +
+                "- lazer\n" +
+                "- investimento\n" +
+                "- conhecimento\n" +
+                "- doação\n\n" +
+                "✅ E agora também é possível registrar receitas!\n\n" +
+                'Basta adicionar "Recebi" antes do valor.\n\n' +
+                "É muito simples:\n\n" +
+                "- Para despesa:\n" +
+                "(Valor) (Onde) em (Categoria)\n" +
+                "Exemplo:\n" +
+                "25 mercado em gastos fixos\n\n" +
+                "- Para receita:\n" +
+                "Recebi (Valor) (De onde) em (Categoria)\n" +
+                "Exemplo:\n" +
+                "Recebi 1500 salário em investimento\n\n" +
+                "Assim, você terá controle total sobre entradas e saídas de dinheiro!"
+            );
           }
           const { amount, description, category } = interpretation.data;
           if (!VALID_CATEGORIES_INCOME.includes(category)) {
-            await UserStats.findOneAndUpdate({ userId }, { $addToSet: { createdCategories: category } }, { new: true, upsert: true });
+            await UserStats.findOneAndUpdate(
+              { userId },
+              { $addToSet: { createdCategories: category } },
+              { new: true, upsert: true }
+            );
           }
-          const newIncome = new Income({ userId, amount, description, category, date: new Date(), messageId: generateId() });
+          const newIncome = new Income({
+            userId,
+            amount,
+            description,
+            category,
+            date: new Date(),
+            messageId: generateId(),
+          });
           await newIncome.save();
           sendIncomeAddedMessage(twiml, newIncome);
-          await UserStats.findOneAndUpdate({ userId }, { $inc: { totalIncome: amount } }, { upsert: true });
-          break; 
+          await UserStats.findOneAndUpdate(
+            { userId },
+            { $inc: { totalIncome: amount } },
+            { upsert: true }
+          );
+          break;
         }
-        
-        devLog("Intent 'add_expense_new_category' (despesa) detectado. Caindo para a lógica unificada...");
+
+        devLog(
+          "Intent 'add_expense_new_category' (despesa) detectado. Caindo para a lógica unificada..."
+        );
       }
 
       case "add_expense": {
-        let { amount, description, category: categoryFromAI } = interpretation.data;
-        let finalCategory = categoryFromAI; 
-        
+        let {
+          amount,
+          description,
+          category: categoryFromAI,
+        } = interpretation.data;
+        let finalCategory = categoryFromAI;
+
         if (!categoryFromAI) {
-          devLog(`Categoria não fornecida pela IA. Tentando inferir pelo histórico...`);
+          devLog(
+            `Categoria não fornecida pela IA. Tentando inferir pelo histórico...`
+          );
           const similarExpense = await Expense.findOne({
             userId,
-            description: new RegExp(`^${description}$`, 'i') 
+            description: new RegExp(`^${description}$`, "i"),
           }).sort({ date: -1 });
 
           if (similarExpense) {
@@ -219,48 +240,64 @@ router.post("/", async (req, res) => {
             devLog(`Categoria inferida do histórico: "${finalCategory}"`);
           }
         } else {
-            devLog(`Usuário especificou a categoria: "${categoryFromAI}". Esta tem prioridade.`);
+          devLog(
+            `Usuário especificou a categoria: "${categoryFromAI}". Esta tem prioridade.`
+          );
         }
 
-        const userHasCustomCategoryAccess = await hasAcessToFeature(userId, "add_expense_new_category");
+        const userHasCustomCategoryAccess = await hasAcessToFeature(
+          userId,
+          "add_expense_new_category"
+        );
         const userStats = await UserStats.findOne({ userId });
         const userCustomCategories = userStats?.createdCategories || [];
 
-        finalCategory = finalCategory || 'outro'; 
-        let isValidCategory = VALID_CATEGORIES.includes(finalCategory) || userCustomCategories.includes(finalCategory);
+        finalCategory = finalCategory || "outro";
+        let isValidCategory =
+          VALID_CATEGORIES.includes(finalCategory) ||
+          userCustomCategories.includes(finalCategory);
 
         if (!isValidCategory) {
-            if (userHasCustomCategoryAccess) {
-                isValidCategory = true;
-                await UserStats.findOneAndUpdate(
-                    { userId },
-                    { $addToSet: { createdCategories: finalCategory } },
-                    { upsert: true }
-                );
-            } else {
-                twiml.message(
-                  `A categoria "${finalCategory}" não existe e você não pode criar novas no plano gratuito.\n\n` +
-                  `Seu gasto com "${description}" foi adicionado na categoria "Outro".`
-                );
-                finalCategory = "outro";
-            }
+          if (userHasCustomCategoryAccess) {
+            isValidCategory = true;
+            await UserStats.findOneAndUpdate(
+              { userId },
+              { $addToSet: { createdCategories: finalCategory } },
+              { upsert: true }
+            );
+          } else {
+            twiml.message(
+              `A categoria "${finalCategory}" não existe e você não pode criar novas no plano gratuito.\n\n` +
+                `Seu gasto com "${description}" foi adicionado na categoria "Outro".`
+            );
+            finalCategory = "outro";
+          }
         }
-        
+
         const newExpense = new Expense({
-            userId, amount, description, category: finalCategory, date: new Date(), messageId: generateId(),
+          userId,
+          amount,
+          description,
+          category: finalCategory,
+          date: new Date(),
+          messageId: generateId(),
         });
 
         await newExpense.save();
         devLog("Salvando nova despesa:", newExpense);
-        
+
         if (isValidCategory) {
-            sendExpenseAddedMessage(twiml, newExpense);
+          sendExpenseAddedMessage(twiml, newExpense);
         }
 
-        await UserStats.findOneAndUpdate({ userId }, { $inc: { totalSpent: amount } }, { upsert: true });
+        await UserStats.findOneAndUpdate(
+          { userId },
+          { $inc: { totalSpent: amount } },
+          { upsert: true }
+        );
 
         break;
-    }
+      }
 
       case "delete_transaction":
         {
@@ -331,20 +368,25 @@ router.post("/", async (req, res) => {
         {
           const { days = 7 } = interpretation.data;
           try {
-            const reportData = await getExpensesReport(userId, days);
+            const daysToRequest = parseInt(days, 10);
+            const reportData = await getExpensesReport(userId, daysToRequest);
 
-            if (reportData.length === 0) {
+            if (reportData.length === 0 && daysToRequest <= 7) { 
               twiml.message(
-                `📉 Não há registros de gastos nos últimos ${days} dias.`
+                `📉 Não há registros de gastos nos últimos ${daysToRequest} dias.`
               );
             } else {
-              const imageUrl = await generateChart(reportData, userId);
-              await sendReportImage(userId, imageUrl);
+              const imageUrl = await generateChart(
+                reportData,
+                userId,
+                daysToRequest
+              );
+              twiml.message().media(imageUrl);
             }
           } catch (error) {
             devLog("Erro ao gerar gráfico:", error);
             twiml.message(
-              "❌ Ocorreu um erro ao gerar o relatório. Tente novamente."
+              `📉 Desculpe, não foi possível gerar o gráfico.\n\nMotivo: ${error}`
             );
           }
         }
@@ -361,11 +403,11 @@ router.post("/", async (req, res) => {
                 `📊 Não há registros de gastos nos últimos ${days} dias para gerar um relatório por categoria.`
               );
             } else {
-              const imageFilename = await generateCategoryChart(
+              const imageUrl = await generateCategoryChart( 
                 categoryReport,
                 userId
               );
-              await sendReportImage(userId, imageFilename);
+              twiml.message().media(imageUrl);
             }
           } catch (error) {
             devLog("Erro ao gerar gráfico por categorias:", error);
@@ -375,11 +417,10 @@ router.post("/", async (req, res) => {
           }
         }
         break;
-
-      case "get_total": {
+      
+        case "get_total": {
         let { category, month, monthName } = interpretation.data;
 
-        // Lógica de fallback para o mês atual (mantida)
         if (!month || !monthName) {
           const now = new Date();
           const currentYear = now.getFullYear();
@@ -463,7 +504,6 @@ router.post("/", async (req, res) => {
       case "detalhes": {
         const previousData = conversationState[userId];
 
-        // Adicionada verificação de 'type' para maior robustez
         if (!previousData || !previousData.type || !previousData.month) {
           twiml.message(
             "🚫 Não há um relatório recente para detalhar. Por favor, peça um total de gastos ou receitas primeiro."
@@ -471,16 +511,13 @@ router.post("/", async (req, res) => {
           break;
         }
 
-        // ALTERADO: Agora extraímos o 'type' do contexto!
         const { type, category, month, monthName } = previousData;
 
         devLog("Iniciando 'detalhes' com o contexto salvo:", previousData);
 
-        let detalhesMessage; // Variável para armazenar a mensagem final
+        let detalhesMessage;
 
-        // ALTERADO: Lógica condicional baseada no 'type'
         if (type === "income") {
-          // Se o tipo for 'income', chama a função de detalhes de RECEITA
           devLog("Chamando getIncomeDetails...");
           detalhesMessage = await getIncomeDetails(
             userId,
@@ -489,7 +526,6 @@ router.post("/", async (req, res) => {
             category
           );
         } else {
-          // Caso contrário (será 'expense'), chama a função de detalhes de DESPESA
           devLog("Chamando getExpenseDetails...");
           detalhesMessage = await getExpenseDetails(
             userId,
@@ -501,7 +537,6 @@ router.post("/", async (req, res) => {
 
         twiml.message(detalhesMessage);
 
-        // Limpa o estado após o uso bem-sucedido
         delete conversationState[userId];
 
         break;
