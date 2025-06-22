@@ -1,6 +1,7 @@
 import express from "express";
 import twilio from "twilio";
 import { devLog } from "../helpers/logger.js";
+import User from "../models/User.js";
 
 import { interpretMessageWithAI } from "../services/aiService.js";
 import {
@@ -19,6 +20,7 @@ import { sendReportImage } from "../services/twilioService.js";
 import Expense from "../models/Expense.js";
 import Income from "../models/Income.js";
 import UserStats from "../models/UserStats.js";
+import Permissions from "../models/Permissions.js";
 import { customAlphabet } from "nanoid";
 import {
   sendGreetingMessage,
@@ -40,16 +42,29 @@ import {
   VALID_CATEGORIES,
   VALID_CATEGORIES_INCOME,
 } from "../utils/constants.js";
-import { hasAcessToFeature } from "../helpers/userUtils.js";
+import { hasAccessToFeature } from "../helpers/userUtils.js";
 import Reminder from "../models/Reminder.js";
+import { fixPhoneNumber } from "../utils/phoneUtils.js";
+import { validateUserAccess } from "../services/userAccessService.js";
 
 const router = express.Router();
 
 router.post("/", async (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
   const userMessage = req.body.Body;
-  const userId = req.body.From;
+  const userId = fixPhoneNumber(req.body.From); // Remove 'whatsapp:+' prefix
+    
   console.log(userId);
+
+  // Check if user exists in database
+ 
+  const { authorized, user } = await validateUserAccess(userId);
+
+  if (!authorized) {
+    twiml.message("🔒 Para utilizar o chatbot, você precisa adquirir o produto primeiro. Acesse: https://seusite.com/comprar");
+    res.writeHead(200, { "Content-Type": "text/xml" });
+    return res.end(twiml.toString());
+  }
 
   const userStats = await UserStats.findOne({ userId }, { blocked: 1 });
 
@@ -61,11 +76,17 @@ router.post("/", async (req, res) => {
 
   const generateId = customAlphabet("1234567890abcdef", 5);
 
+  const userMongoId = await User.findOne({ phoneNumber: userId }, { _id: 1 });
+
+  const userMongoIdString = userMongoId._id.toString();
+
+  devLog(userMongoIdString)
+
   try {
     const interpretation = await interpretMessageWithAI(userMessage);
-    const userHasFreeCategorization = await hasAcessToFeature(
-      userId,
-      "add_expense_new_category"
+    const userHasFreeCategorization = await hasAccessToFeature(
+      userMongoIdString,
+      "categories"
     );
     devLog("intent:" + interpretation.intent);
 
@@ -250,7 +271,8 @@ router.post("/", async (req, res) => {
           messageId,
         } = interpretation.data;
         devLog(newAmount, newDescription, newCategory, newType);
-        if (!(await hasAcessToFeature(userId, "add_expense_new_category"))) {
+        if (!(await hasAccessToFeature(userMongoIdString
+          , "categories"))) {
           twiml.message(
             "🚫 Este recurso está disponível como um complemento pago.\n\n" +
               "🤖 Com ele, você poderá criar novas categorias personalizadas!\n\n" +
@@ -567,7 +589,7 @@ router.post("/", async (req, res) => {
         break;
 
       case "financial_help":
-        if (!(await hasAcessToFeature(userId, "financial_help"))) {
+        if (!(await hasAccessToFeature(userMongoIdString, "adap-turbo"))) {
           twiml.message(
             "🚫 Este recurso está disponível como um complemento pago. Com ele você pode pedir coneselhos financeiros ou de investimentos. Acesse o site para ativar: https://pay.hotmart.com/S98803486L?bid=1746998755631"
           );
