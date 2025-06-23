@@ -1,5 +1,5 @@
-import Expense from "../models/Expense.js";
-import Income from "../models/Income.js";
+import Transaction from "../models/Transaction.js";
+import Category from "../models/Category.js";
 import Reminder from "../models/Reminder.js";
 import UserStats from "../models/UserStats.js";
 
@@ -13,24 +13,30 @@ export async function getCurrentTotalIncome(userId) {
   }
 }
 
-export async function calculateTotalExpenses(userId, category = null, type) {
-  const filter = category
-    ? { userId, category: { $regex: new RegExp(`^${category.trim()}$`, "i") } }
-    : { userId };
-
-  if (type === "income") {
-    const result = await Income.aggregate([
-      { $match: filter },
-      { $group: { _id: null, total: { $sum: "$amount" } } },
-    ]);
-    return result.length ? result[0].total : 0;
-  } else {
-    const result = await Expense.aggregate([
-      { $match: filter },
-      { $group: { _id: null, total: { $sum: "$amount" } } },
-    ]);
-    return result.length ? result[0].total : 0;
+export async function calculateTotalExpenses(userId, categoryName = null, type) {
+  let filter = { userId, type };
+  
+  if (categoryName) {
+    // Find category by name for this user
+    const category = await Category.findOne({ 
+      userId, 
+      name: { $regex: new RegExp(`^${categoryName.trim()}$`, "i") } 
+    });
+    
+    if (category) {
+      filter.categoryId = category._id.toString();
+    } else {
+      // If category not found, return 0
+      return 0;
+    }
   }
+
+  const result = await Transaction.aggregate([
+    { $match: filter },
+    { $group: { _id: null, total: { $sum: "$amount" } } },
+  ]);
+  
+  return result.length ? result[0].total : 0;
 }
 
 export async function getCurrentTotalSpent(userId) {
@@ -48,8 +54,8 @@ export async function getExpensesReport(userId, days) {
   startDate.setDate(startDate.getDate() - days);
   startDate.setHours(0, 0, 0, 0);
 
-  return Expense.aggregate([
-    { $match: { userId, date: { $gte: startDate } } },
+  return Transaction.aggregate([
+    { $match: { userId, type: "expense", date: { $gte: startDate } } },
     {
       $group: {
         _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
@@ -65,15 +71,45 @@ export async function getCategoryReport(userId, days) {
   startDate.setDate(startDate.getDate() - days);
   startDate.setHours(0, 0, 0, 0);
 
-  return Expense.aggregate([
-    { $match: { userId, date: { $gte: startDate } } },
+  return Transaction.aggregate([
+    { $match: { userId, type: "expense", date: { $gte: startDate } } },
+    {
+      $addFields: {
+        categoryObjectId: { $toObjectId: "$categoryId" }
+      }
+    },
+    {
+      $lookup: {
+        from: "categories",
+        localField: "categoryObjectId",
+        foreignField: "_id",
+        as: "category"
+      }
+    },
+    { $unwind: "$category" },
     {
       $group: {
-        _id: "$category",
+        _id: "$category.name",
         total: { $sum: "$amount" },
       },
     },
   ]);
+}
+
+// Helper function to get or create a category
+export async function getOrCreateCategory(userId, categoryName) {
+  let category = await Category.findOne({ userId, name: categoryName });
+  
+  if (!category) {
+    category = new Category({
+      userId,
+      name: categoryName,
+      color: "#3498db" // Default color
+    });
+    await category.save();
+  }
+  
+  return category;
 }
 
 export async function getTotalReminders(userId) {

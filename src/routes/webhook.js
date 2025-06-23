@@ -11,14 +11,15 @@ import {
   getCategoryReport,
   getCurrentTotalSpent,
   getTotalReminders,
+  getOrCreateCategory,
 } from "../helpers/totalUtils.js";
 import {
   generateChart,
   generateCategoryChart,
 } from "../services/chartService.js";
 import { sendReportImage } from "../services/twilioService.js";
-import Expense from "../models/Expense.js";
-import Income from "../models/Income.js";
+import Transaction from "../models/Transaction.js";
+import Category from "../models/Category.js";
 import UserStats from "../models/UserStats.js";
 import Permissions from "../models/Permissions.js";
 import { customAlphabet } from "nanoid";
@@ -104,22 +105,28 @@ router.post("/", async (req, res) => {
           finalCategory = "outro";
         }
 
+        // Get or create category
+        const categoryDoc = await getOrCreateCategory(userId, finalCategory);
+
         if (
           VALID_CATEGORIES_INCOME.includes(finalCategory) &&
           !userHasFreeCategorization
         ) {
-          const newIncome = new Income({
+          const newIncome = new Transaction({
             userId,
             amount,
             description,
-            category: finalCategory,
+            categoryId: categoryDoc._id.toString(),
+            type: "income",
             date: new Date(),
             messageId: generateId(),
+            paymentMethod: "default",
+            status: "completed",
           });
           devLog("Salvando nova receita:", newIncome);
           await newIncome.save();
           devLog("Enviando mensagem de confirmação ao usuário.");
-          sendIncomeAddedMessage(twiml, newIncome);
+          sendIncomeAddedMessage(twiml, { ...newIncome.toObject(), category: categoryDoc.name });
           await UserStats.findOneAndUpdate(
             { userId },
             { $inc: { totalIncome: amount } },
@@ -128,44 +135,51 @@ router.post("/", async (req, res) => {
         } else {
           const regex = new RegExp(description, "i");
 
-          const similarIncome = await Income.findOne({
+          const similarIncome = await Transaction.findOne({
             userId,
+            type: "income",
             description: { $regex: regex },
           }).sort({ date: -1 });
 
-          if (userHasFreeCategorization && similarIncome?.category) {
-            const inferredIncome = similarIncome.category;
+                      if (userHasFreeCategorization && similarIncome?.categoryId) {
+              const inferredCategory = await Category.findById(similarIncome.categoryId);
 
-            const newIncome = new Income({
-              userId,
-              amount,
-              description,
-              category: inferredIncome,
-              date: new Date(),
-              messageId: generateId(),
-            });
-            devLog("Salvando nova receita:", newIncome);
-            await newIncome.save();
-            devLog("Enviando mensagem de confirmação ao usuário.");
-            sendIncomeAddedMessage(twiml, newIncome);
+                          const newIncome = new Transaction({
+                userId,
+                amount,
+                description,
+                categoryId: inferredCategory._id.toString(),
+                type: "income",
+                date: new Date(),
+                messageId: generateId(),
+                paymentMethod: "default",
+                status: "completed",
+              });
+              devLog("Salvando nova receita:", newIncome);
+              await newIncome.save();
+              devLog("Enviando mensagem de confirmação ao usuário.");
+              sendIncomeAddedMessage(twiml, { ...newIncome.toObject(), category: inferredCategory.name });
             await UserStats.findOneAndUpdate(
               { userId },
               { $inc: { totalIncome: amount } },
               { upsert: true }
             );
           } else {
-            const newIncome = new Income({
+            const newIncome = new Transaction({
               userId,
               amount,
               description,
-              category: finalCategory,
+              categoryId: categoryDoc._id.toString(),
+              type: "income",
               date: new Date(),
               messageId: generateId(),
+              paymentMethod: "default",
+              status: "completed",
             });
             devLog("Salvando nova receita:", newIncome);
             await newIncome.save();
             devLog("Enviando mensagem de confirmação ao usuário.");
-            sendIncomeAddedMessage(twiml, newIncome);
+            sendIncomeAddedMessage(twiml, { ...newIncome.toObject(), category: categoryDoc.name });
             await UserStats.findOneAndUpdate(
               { userId },
               { $inc: { totalIncome: amount } },
@@ -190,22 +204,28 @@ router.post("/", async (req, res) => {
             finalCategory = "outro";
           }
 
+          // Get or create category
+          const categoryDoc = await getOrCreateCategory(userId, finalCategory);
+
           if (
             VALID_CATEGORIES.includes(category) &&
             !userHasFreeCategorization
           ) {
-            const newExpense = new Expense({
+            const newExpense = new Transaction({
               userId,
               amount,
               description,
-              category: finalCategory,
+              categoryId: categoryDoc._id.toString(),
+              type: "expense",
               date: new Date(),
               messageId: generateId(),
+              paymentMethod: "default",
+              status: "completed",
             });
             devLog("Salvando nova despesa:", newExpense);
             await newExpense.save();
             devLog("Enviando mensagem de confirmação ao usuário.");
-            sendExpenseAddedMessage(twiml, newExpense);
+            sendExpenseAddedMessage(twiml, { ...newExpense.toObject(), category: categoryDoc.name });
             await UserStats.findOneAndUpdate(
               { userId },
               { $inc: { totalSpent: amount } },
@@ -214,44 +234,51 @@ router.post("/", async (req, res) => {
           } else {
             const regex = new RegExp(description, "i");
 
-            const similarExpense = await Expense.findOne({
+            const similarExpense = await Transaction.findOne({
               userId,
+              type: "expense",
               description: { $regex: regex },
             }).sort({ date: -1 });
 
-            if (userHasFreeCategorization && similarExpense?.category) {
-              const inferredCategory = similarExpense.category;
+            if (userHasFreeCategorization && similarExpense?.categoryId) {
+              const inferredCategory = await Category.findById(similarExpense.categoryId);
 
-              const newExpense = new Expense({
+              const newExpense = new Transaction({
                 userId,
                 amount,
                 description,
-                category: inferredCategory,
+                categoryId: inferredCategory._id.toString(),
+                type: "expense",
                 date: new Date(),
                 messageId: generateId(),
+                paymentMethod: "default",
+                status: "completed",
               });
               devLog("Salvando nova despesa:", newExpense);
               await newExpense.save();
               devLog("Enviando mensagem de confirmação ao usuário.");
-              sendExpenseAddedMessage(twiml, newExpense);
+              sendExpenseAddedMessage(twiml, { ...newExpense.toObject(), category: inferredCategory.name });
               await UserStats.findOneAndUpdate(
                 { userId },
                 { $inc: { totalSpent: amount } },
                 { upsert: true }
               );
             } else {
-              const newExpense = new Expense({
+              const newExpense = new Transaction({
                 userId,
                 amount,
                 description,
-                category: finalCategory,
+                categoryId: categoryDoc._id.toString(),
+                type: "expense",
                 date: new Date(),
                 messageId: generateId(),
+                paymentMethod: "default",
+                status: "completed",
               });
               devLog("Salvando nova despesa:", newExpense);
               await newExpense.save();
               devLog("Enviando mensagem de confirmação ao usuário.");
-              sendExpenseAddedMessage(twiml, newExpense);
+              sendExpenseAddedMessage(twiml, { ...newExpense.toObject(), category: categoryDoc.name });
               await UserStats.findOneAndUpdate(
                 { userId },
                 { $inc: { totalSpent: amount } },
@@ -310,26 +337,25 @@ router.post("/", async (req, res) => {
             break;
           }
 
-          if (!VALID_CATEGORIES_INCOME.includes(newCategory)) {
-            await UserStats.findOneAndUpdate(
-              { userId },
-              { $addToSet: { createdCategories: newCategory } },
-              { new: true, upsert: true }
-            );
-          }
+          // Get or create category in the dedicated categories collection
+          const categoryDoc = await getOrCreateCategory(userId, newCategory);
+
           console.log("Categoria:", newCategory);
-          const newIncome = new Income({
+          const newIncome = new Transaction({
             userId,
             amount: newAmount,
             description: newDescription,
-            category: newCategory,
+            categoryId: categoryDoc._id.toString(),
+            type: "income",
             date: new Date(),
             messageId: generateId(),
+            paymentMethod: "default",
+            status: "completed",
           });
           devLog("Salvando nova receita:", newIncome);
           await newIncome.save();
           devLog("Enviando mensagem de confirmação ao usuário.");
-          sendIncomeAddedMessage(twiml, newIncome);
+          sendIncomeAddedMessage(twiml, { ...newIncome.toObject(), category: categoryDoc.name });
           await UserStats.findOneAndUpdate(
             { userId },
             { $inc: { totalIncome: newAmount } },
@@ -337,33 +363,29 @@ router.post("/", async (req, res) => {
           );
           break;
         } else if (newType === "expense") {
-          if (!VALID_CATEGORIES.includes(newCategory)) {
-            await UserStats.findOneAndUpdate(
-              { userId },
-              { $addToSet: { createdCategories: newCategory } },
-              { new: true, upsert: true }
-            );
+          // Get or create category in the dedicated categories collection
+          const categoryDoc = await getOrCreateCategory(userId, newCategory);
 
-            const newExpense = new Expense({
-              userId,
-              amount: newAmount,
-              description: newDescription,
-              category: newCategory,
-              date: new Date(),
-              messageId: generateId(),
-            });
-            devLog("Salvando nova despesa:", newExpense);
-            await newExpense.save();
-            devLog("Enviando mensagem de confirmação ao usuário.");
-            sendExpenseAddedMessage(twiml, newExpense);
-            await UserStats.findOneAndUpdate(
-              { userId },
-              { $inc: { totalSpent: newAmount } },
-              { upsert: true }
-            );
-          } else {
-            sendHelpMessage(twiml);
-          }
+          const newExpense = new Transaction({
+            userId,
+            amount: newAmount,
+            description: newDescription,
+            categoryId: categoryDoc._id.toString(),
+            type: "expense",
+            date: new Date(),
+            messageId: generateId(),
+            paymentMethod: "default",
+            status: "completed",
+          });
+          devLog("Salvando nova despesa:", newExpense);
+          await newExpense.save();
+          devLog("Enviando mensagem de confirmação ao usuário.");
+          sendExpenseAddedMessage(twiml, { ...newExpense.toObject(), category: categoryDoc.name });
+          await UserStats.findOneAndUpdate(
+            { userId },
+            { $inc: { totalSpent: newAmount } },
+            { upsert: true }
+          );
           break;
         }
       }
@@ -372,62 +394,59 @@ router.post("/", async (req, res) => {
         {
           const { messageId } = interpretation.data;
           try {
-            const isIncome = await Income.findOne({ userId, messageId });
+            const transaction = await Transaction.findOne({ userId, messageId });
+            if (!transaction) {
+              twiml.message(
+                `🚫 Nenhuma transação encontrada com o ID #_${messageId}_ para exclusão.`
+              );
+              break;
+            }
+            
+            const category = await Category.findById(transaction.categoryId);
 
-            if (isIncome) {
-              const income = await Income.findOneAndDelete({
+                          await Transaction.findOneAndDelete({
                 userId,
                 messageId,
               });
 
-              if (income) {
+              // Update user stats based on transaction type
+              if (transaction.type === "income") {
                 await UserStats.findOneAndUpdate(
                   { userId },
-                  { $inc: { totalIncome: -income.amount } }
+                  { $inc: { totalIncome: -transaction.amount } }
                 );
-              }
+                sendIncomeDeletedMessage(twiml, { ...transaction.toObject(), category: category.name });
+              } else {
+                await UserStats.findOneAndUpdate(
+                  { userId },
+                  { $inc: { totalSpent: -transaction.amount } }
+                );
 
-              sendIncomeDeletedMessage(twiml, income);
-              break;
-            }
+                // Check if this was the last transaction using this category
+                const categoryId = category._id;
+                const categoryName = category.name;
+                
+                // Only check for custom categories (non-default ones)
+                const isCustomCategory = !VALID_CATEGORIES.includes(categoryName) && !VALID_CATEGORIES_INCOME.includes(categoryName);
 
-            const expense = await Expense.findOneAndDelete({
-              userId,
-              messageId,
-            });
-
-            if (expense) {
-              const isCustomCategory = !VALID_CATEGORIES.includes(
-                expense.category
-              );
-
-              if (isCustomCategory) {
-                const count = await Expense.countDocuments({
-                  userId,
-                  category: expense.category,
-                });
-                if (count === 0) {
-                  await UserStats.findOneAndUpdate(
-                    { userId },
-                    { $pull: { createdCategories: expense.category } }
-                  );
+                if (isCustomCategory) {
+                  const count = await Transaction.countDocuments({
+                    userId,
+                    categoryId: categoryId.toString(),
+                  });
+                  
+                  // If no more transactions use this category, delete it
+                  if (count === 0) {
+                    await Category.findByIdAndDelete(categoryId);
+                  }
                 }
-              }
 
-              sendExpenseDeletedMessage(twiml, expense);
-              await UserStats.findOneAndUpdate(
-                { userId },
-                { $inc: { totalSpent: -expense.amount } }
-              );
-            } else {
-              twiml.message(
-                `🚫 Nenhum gasto encontrado com o ID #_${messageId}_ para exclusão.`
-              );
-            }
+                sendExpenseDeletedMessage(twiml, { ...transaction.toObject(), category: category.name });
+              }
           } catch (error) {
-            devLog("Erro ao excluir despesa pelo messageId:", error);
+            devLog("Erro ao excluir transação pelo messageId:", error);
             twiml.message(
-              "🚫 Ocorreu um erro ao tentar excluir a despesa. Tente novamente."
+              "🚫 Ocorreu um erro ao tentar excluir a transação. Tente novamente."
             );
           }
         }
