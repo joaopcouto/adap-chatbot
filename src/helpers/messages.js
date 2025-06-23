@@ -1,4 +1,5 @@
 import { OpenAI } from "openai";
+import { formatInBrazil } from "../utils/dateUtils.js";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -79,25 +80,29 @@ Lá tem dicas diárias pra você gastar melhor e fazer seu dinheiro render mais!
 }
 
 export function sendIncomeAddedMessage(twiml, incomeData) {
+  const formattedDate = formatInBrazil(incomeData.date); //formato brasil
+
   twiml.message(
     `📝 *Receita adicionada*\n📌 ${incomeData.description.toUpperCase()} (_${
       incomeData.category.charAt(0).toUpperCase() + incomeData.category.slice(1)
     }_)\n💰 *R$ ${incomeData.amount.toFixed(
       2
-    )}*\n\n📅 ${incomeData.date.toLocaleDateString("pt-BR")} - #${
+    )}*\n\n📅 ${formattedDate} - #${
       incomeData.messageId
     }`
   );
 }
 
 export function sendExpenseAddedMessage(twiml, expenseData) {
+  const formattedDate = formatInBrazil(expenseData.date);
+
   twiml.message(
     `📝 *Gasto adicionado*\n📌 ${expenseData.description.toUpperCase()} (_${
       expenseData.category.charAt(0).toUpperCase() +
       expenseData.category.slice(1)
     }_)\n💰 *R$ ${expenseData.amount.toFixed(
       2
-    )}*\n\n📅 ${expenseData.date.toLocaleDateString("pt-BR")} - #${
+    )}*\n\n📅 ${formattedDate} - #${
       expenseData.messageId
     }`
   );

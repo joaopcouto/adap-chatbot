@@ -2,16 +2,17 @@ import Expense from "../models/Expense.js";
 import Income from "../models/Income.js";
 import Reminder from "../models/Reminder.js";
 import UserStats from "../models/UserStats.js";
+import { TIMEZONE } from "../utils/dateUtils.js"; 
+import { formatInBrazil } from "../utils/dateUtils.js"; 
 
 export async function calculateTotalIncome(userId, month = null) {
   let matchStage = { userId };
 
   if (month) {
-    const [year, monthNumber] = month.split("-");
     matchStage.$expr = {
-      $and: [
-        { $eq: [{ $year: "$date" }, parseInt(year)] },
-        { $eq: [{ $month: "$date" }, parseInt(monthNumber)] },
+      $eq: [
+        { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } },
+        month
       ],
     };
   }
@@ -40,14 +41,11 @@ export async function calculateTotalExpenses(
   }
 
   if (month) {
-    const [year, monthNumber] = month.split("-");
-    matchStage.date = {
-      $gte: new Date(
-        Date.UTC(parseInt(year), parseInt(monthNumber) - 1, 1, 0, 0, 0)
-      ),
-      $lte: new Date(
-        Date.UTC(parseInt(year), parseInt(monthNumber), 0, 23, 59, 59)
-      ),
+    matchStage.$expr = {
+      $eq: [
+        { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } },
+        month
+      ],
     };
   }
 
@@ -65,28 +63,37 @@ export async function calculateTotalExpenses(
 
 export async function getExpensesReport(userId, days) {
   const startDate = new Date();
-  startDate.setDate(startDate.getDate() - days);
-  startDate.setHours(0, 0, 0, 0);
+  startDate.setDate(startDate.getDate() - (days + 1));
 
   return Expense.aggregate([
     { $match: { userId, date: { $gte: startDate } } },
     {
       $group: {
-        _id: { $dateToString: { format: "%Y-%m-%d", date: "$date" } },
+        _id: { $dateToString: { format: "%Y-%m-%d", date: "$date", timezone: TIMEZONE } },
         total: { $sum: "$amount" },
       },
     },
-    { $sort: { _id: 1 } },
+    { $sort: { _id: 1 } }, 
+    { $limit: days } 
   ]);
 }
 
 export async function getCategoryReport(userId, days) {
   const startDate = new Date();
-  startDate.setDate(startDate.getDate() - days);
-  startDate.setHours(0, 0, 0, 0);
+  startDate.setDate(startDate.getDate() - (days + 1));
+  
+  const todayInBrazil = new Date().toLocaleDateString('en-CA', { timeZone: TIMEZONE }); 
 
   return Expense.aggregate([
     { $match: { userId, date: { $gte: startDate } } },
+    { $addFields: {
+        brazilDateStr: { $dateToString: { format: "%Y-%m-%d", date: "$date", timezone: TIMEZONE } }
+      }
+    },
+    { $match: {
+        brazilDateStr: { $lte: todayInBrazil }
+      }
+    },
     {
       $group: {
         _id: "$category",
@@ -99,24 +106,24 @@ export async function getCategoryReport(userId, days) {
 export async function getExpenseDetails(userId, month, monthName, category) {
   try {
     let matchStage = { userId };
+    
     if (category) {
       matchStage.category = { $regex: new RegExp(`^${category.trim()}$`, "i") };
     }
+    
     if (month) {
-      const [year, monthNumber] = month.split("-");
-      matchStage.date = {
-        $gte: new Date(
-          Date.UTC(parseInt(year), parseInt(monthNumber) - 1, 1, 0, 0, 0)
-        ),
-        $lte: new Date(
-          Date.UTC(parseInt(year), parseInt(monthNumber), 0, 23, 59, 59)
-        ),
+      matchStage.$expr = {
+        $eq: [
+          { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } },
+          month
+        ],
       };
     }
-    const expenses = await Expense.find(matchStage).sort({
-      category: 1,
-      date: 1,
-    });
+    
+    const expenses = await Expense.aggregate([
+      { $match: matchStage },
+      { $sort: { category: 1, date: 1 } }
+    ]);
 
     if (expenses.length === 0) {
       return "Nenhum gasto encontrado para este período.";
@@ -152,6 +159,7 @@ export async function getExpenseDetails(userId, month, monthName, category) {
     }
 
     return message.trimEnd();
+
   } catch (error) {
     console.error("Erro ao buscar despesas por categoria:", error);
     return "Ocorreu um erro ao buscar os gastos. Tente novamente.";
@@ -167,23 +175,23 @@ export async function getIncomeDetails(userId, month, monthName, category) {
     }
 
     if (month) {
-      const [year, monthNumber] = month.split("-");
-      matchStage.date = {
-        $gte: new Date(
-          Date.UTC(parseInt(year), parseInt(monthNumber) - 1, 1, 0, 0, 0)
-        ),
-        $lte: new Date(
-          Date.UTC(parseInt(year), parseInt(monthNumber), 0, 23, 59, 59)
-        ),
+       matchStage.$expr = {
+        $eq: [
+          { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } },
+          month
+        ],
       };
     }
 
-    const incomes = await Income.find(matchStage).sort({ date: 1 });
+    const incomes = await Income.aggregate([
+      { $match: matchStage },
+      { $sort: { date: 1 } }
+    ]);
 
     if (incomes.length === 0) {
       return "Nenhuma receita encontrada para este período.";
     }
-
+    
     let header;
     if (category) {
       header = `🧾 Detalhes das receitas de _*${category}*_ no mês de _*${monthName}*_:\n`;
@@ -206,36 +214,22 @@ export async function getIncomeDetails(userId, month, monthName, category) {
 }
 
 export async function getTotalReminders(userId) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
   const allFutureRemindersArray = await Reminder.find({
     userId,
-    date: { $gte: today },
-  });
+    date: { $gte: new Date() },
+  }).sort({ date: 'asc' });
 
-  const data = allFutureRemindersArray.map(({ description, date }) => ({
-    description,
-    date,
-  }));
-
-  for (let i = 0; i < allFutureRemindersArray.length; i++) {
-    data[i] = {
-      description: allFutureRemindersArray[i].description,
-      date: allFutureRemindersArray[i].date,
-      messageId: allFutureRemindersArray[i].messageId,
-    };
+  if (allFutureRemindersArray.length === 0) {
+    return 'Você não tem nenhum lembrete futuro. ✨';
   }
 
-  const allFutureReminders = data
+  const allFutureReminders = allFutureRemindersArray
     .map((r) => {
-      const dateObj = new Date(r.date);
-      dateObj.setMinutes(dateObj.getMinutes() + dateObj.getTimezoneOffset());
-      const formattedDate = dateObj.toLocaleDateString("pt-BR");
-      const messageCode = r.messageId ? `#${r.messageId}` : "";
-      return `🗓️ ${r.description.toUpperCase()} - ${formattedDate} - ${messageCode}`;
+      const formattedDate = formatInBrazil(r.date); 
+      const messageCode = r.messageId ? `#_${r.messageId}_` : "";
+      return `🗓️ ${r.description.toUpperCase()} - *${formattedDate}* ${messageCode}`;
     })
     .join("\n\n");
 
-  return allFutureReminders;
+  return `🔔 *Seus próximos lembretes:*\n\n${allFutureReminders}`;
 }
