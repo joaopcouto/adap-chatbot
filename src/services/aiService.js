@@ -1,3 +1,5 @@
+// src/services/aiService.js
+
 import { OpenAI } from "openai";
 
 const openai = new OpenAI({
@@ -42,19 +44,15 @@ export async function interpretMessageWithAI(message) {
   - Amount: A positive numerical value representing the transaction amount.
   - Description: A short and meaningful description of the transaction.
   - Category: 
-    When parsing user input, expect the structure: (amount) (description) (optional category).
-    - If a third word (or more) appears after amount and description, treat it as the intended category.
-    - Compare it to the valid categories.
-    - If it matches exactly, proceed with "add_expense" intent or "add_income" depending on the message type.
-    - If it does not match, set intent to "add_expense_new_category" and use it exactly as provided.
+    **The user message structure is typically "(amount) (description) (category)" or "(amount) (description) em (category)". The description can contain multiple words. The category is usually the last word or phrase in the message. Your main task is to correctly separate the multi-word description from the category.**
 
   Important Rule:
-  IF the user provides a category,
-    - IF the category IS EXACTLY one of the following ("gastos fixos", "lazer", "investimento", "conhecimento", "doação" for expenses or "Salário", "Renda Extra" for income),
-      THEN keep the intent as "add_expense" or "add_income" depending on the message type.
-    - ELSE (if the provided category does not exactly match any of the above),
-      THEN the intent MUST be "add_expense_new_category", and you must extract the category exactly as written by the user, along with the type (income or expense).
-    - If the user does not specify a category and you cannot reliably determine one from the description, the value for "category" MUST be null. DO NOT return instructional text.
+  IF the user provides a category at the end of the message,
+    - IF the category IS EXACTLY one of the following ("gastos fixos", "lazer", ...),
+      THEN keep the intent as "add_expense" or "add_income".
+    - ELSE (if the provided category does not match any of the above),
+      THEN the intent MUST be "add_transaction_new_category", and you must extract the category and the transaction type ('income' or 'expense').
+    - If the user does not specify a category and you cannot reliably determine one, the value for "category" MUST be null. DO NOT return instructional text.
 
   Valid categories for "add_expense":
   - "gastos fixos"
@@ -88,7 +86,7 @@ export async function interpretMessageWithAI(message) {
        Respond only with a valid JSON object without any additional formatting or explanation
      - Return a JSON object with the intent and extracted data. Use this format:
        {
-         "intent": "add_income" | "add_expense" | "add_expense_new_category" | "delete_transaction" | "generate_daily_chart" | "generate_category_chart" | "get_total_income" |"get_total" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "financial_help",
+         "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "delete_transaction" | "generate_daily_chart" | "generate_category_chart" | "get_total_income" |"get_total" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "financial_help",
          "data": {
            "amount": number,
            "description": string,
@@ -103,20 +101,27 @@ export async function interpretMessageWithAI(message) {
   
   5. Examples of User Inputs & Correct Outputs (if user): 
      - User: "Recebi 1000 reais de salário"
-       Response: { "intent": "add_income", "data": { "amount": 1000, "description": "salário" } }
+       Response: { "intent": "add_income", "data": { "amount": 1000, "description": "salário", "category": null } }
      - User: "12 lanche" 
        Response: { "intent": "add_expense", "data": { "amount": 12, "description": "lanche", "category": null } }
      - User: "15 uber"
        Response: { "intent": "add_expense", "data": { "amount": 15, "description": "uber", "category": null } }
+     **- User: "100 cofrinho inter em investimento"
+       Response: { "intent": "add_expense", "data": { "amount": 100, "description": "cofrinho inter", "category": "investimento" } }**
      - User: "Recebi 20 com freelance na categoria extras"
-       Response: { intent: "add_expense_new_category", data: { amount: 20, description: "freelance", category: "extras", type: "income" } }
-     - User: "25 comida em alimentação" → { intent: "add_expense_new_category", data: { amount: 25, description: "comida", category: "alimentação", type: "expense" } }
+       Response: { "intent": "add_transaction_new_category", "data": { "amount": 20, "description": "freelance", "category": "extras", "type": "income" } }
+     - User: "25 comida em alimentação"
+       Response: { "intent": "add_transaction_new_category", "data": { "amount": 25, "description": "comida", "category": "alimentação", "type": "expense" } }
      - User: "Gastei 50 com filmes em lazer"
        Response: { "intent": "add_expense", "data": { "amount": 50, "description": "filmes", "category": "lazer" } }
      - User: "Gastei 20 com uber em transporte"
-       Response: { "intent": "add_expense_new_category", "data": { "amount": 20, "description": "uber", "category": "transporte" } }
+       Response: { "intent": "add_transaction_new_category", "data": { "amount": 20, "description": "uber", "category": "transporte", "type": "expense" } }
+     - User: "Recebi 20 com freelance na categoria extras"
+       Response: { "intent": "add_transaction_new_category", "data": { "amount": 20, "description": "freelance", "category": "extras", "type": "income" } }
+     - User: "Recebi 930 com pix na categoria dívidas"
+       Response: { "intent": "add_transaction_new_category", "data": { "amount": 930, "description": "pix", "category": "dívidas", "type": "income" } }
      - User: "Remover gasto #4cdc9"
-       Response: { "intent": "delete_transaction", "data": { messageId: 4cdc9 } }
+       Response: { "intent": "delete_transaction", "data": { "messageId": "4cdc9" } }
      - User: "QUAIS foram meus gastos nos últimos 10 dias?"
        Response: { "intent": "generate_daily_chart", "data": { "days": 10}}
      - User: "ONDE foram meus gastos nos últimos 7 dias?"
@@ -126,13 +131,13 @@ export async function interpretMessageWithAI(message) {
      - User: "Gasto total"
        Response: { "intent": "get_total", "data": {} }
      - User: "Qual é a minha receita total?"
-       Response: { "intent": "get_total_income", "data": { "month": "2025-05", "monthName": "Maio" } }
+       Response: { "intent": "get_total_income", "data": { } }
      - User: "Qual meu gasto total com lazer?"
        Response: { "intent": "get_total", "data": { "category": "lazer" } }
      - User: "Qual meu gasto total com transporte em Janeiro?"
        Response: { "intent": "get_total", "data": { "category": "transporte", "month": "2025-01", "monthName": "Janeiro" } }
      - User: "Quanto gastei em fevereiro?"
-       Response: { "intent": "get_total", "data": { } }
+       Response: { "intent": "get_total", "data": { "month": "2025-02", "monthName": "Fevereiro" } }
      - User: "Me mostre a receita de Renda Extra do mês passado"
        Response: { "intent": "get_total_income", "data": { "category": "Renda Extra", "month": "2025-04", "monthName": "Abril" } }
      - User: "detalhes"
@@ -148,7 +153,7 @@ export async function interpretMessageWithAI(message) {
      - User: "Devo investir mais em ações ou renda fixa?"
        Response: { "intent": "financial_help", "data": {} }
      - User: "30 uber transporte"
-       Response: { "intent": "add_expense_new_category", "data": { "amount": 30, "description": "uber", "category": "transporte" } }
+       Response: { "intent": "add_expense_new_category", "data": { "amount": 30, "description": "uber", "category": "transporte", "type": "expense" } }
   
   
   Now, interpret this message: "${message}"`;
@@ -160,9 +165,11 @@ export async function interpretMessageWithAI(message) {
   });
 
   try {
-    return JSON.parse(response.choices[0].message.content);
+    // Adicionei uma limpeza para remover markdown que a IA às vezes adiciona
+    const cleanResponse = response.choices[0].message.content.replace(/```json\n|```/g, '').trim();
+    return JSON.parse(cleanResponse);
   } catch (err) {
-    console.error("Erro ao interpretar IA:", err);
+    console.error("Erro ao interpretar IA:", err, "Raw response:", response.choices[0].message.content);
     return { intent: "financial_help", data: {} };
   }
 }
