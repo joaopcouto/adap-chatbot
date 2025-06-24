@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { spawn } from "child_process";
 
-export async function generateChart(expenses, userId) {
+export async function generateChart(expenses, userId, days) {
   return new Promise((resolve, reject) => {
     const sanitizedUserId = userId.replace(/[^a-zA-Z0-9]/g, "_");
 
@@ -26,6 +26,7 @@ export async function generateChart(expenses, userId) {
       "generate_chart.py",
       tempFilePath,
       outputImagePath,
+      days.toString()
     ]);
 
     let imageUrl = "";
@@ -61,7 +62,9 @@ export async function generateChart(expenses, userId) {
       if (imageUrl) {
         resolve(imageUrl);
       } else {
-        reject("Erro ao gerar ou obter URL da imagem.\n" + errorOutput);
+        // Se errorOutput tiver conteúdo, usamos ele. Senão, uma mensagem padrão.
+        const finalError = errorOutput || "Ocorreu um erro ao gerar a imagem.";
+        reject(finalError); // Rejeita a promise com a mensagem do Python!
       }
     });
   });

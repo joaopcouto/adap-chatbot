@@ -6,11 +6,12 @@ import User from "../models/User.js";
 import { interpretMessageWithAI } from "../services/aiService.js";
 import {
   calculateTotalExpenses,
-  getCurrentTotalIncome,
+  calculateTotalIncome,
   getExpensesReport,
   getCategoryReport,
-  getCurrentTotalSpent,
   getTotalReminders,
+  getExpenseDetails,
+  getIncomeDetails,
   getOrCreateCategory,
 } from "../helpers/totalUtils.js";
 import {
@@ -30,14 +31,10 @@ import {
   sendExpenseAddedMessage,
   sendIncomeDeletedMessage,
   sendExpenseDeletedMessage,
-  sendTotalIncomeMessage,
-  sendTotalExpensesMessage,
-  sendTotalExpensesAllMessage,
   sendFinancialHelpMessage,
   sendReminderMessage,
   sendTotalRemindersMessage,
   sendReminderDeletedMessage,
-  sendTotalExpensesLastMonthsMessage,
 } from "../helpers/messages.js";
 import {
   VALID_CATEGORIES,
@@ -49,6 +46,8 @@ import { fixPhoneNumber } from "../utils/phoneUtils.js";
 import { validateUserAccess } from "../services/userAccessService.js";
 
 const router = express.Router();
+
+let conversationState = {};
 
 router.post("/", async (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
@@ -67,6 +66,7 @@ router.post("/", async (req, res) => {
     return res.end(twiml.toString());
   }
 
+  const previousData = conversationState[userId];
   const userStats = await UserStats.findOne({ userId }, { blocked: 1 });
 
   if (userStats?.blocked) {
@@ -90,6 +90,8 @@ router.post("/", async (req, res) => {
       "categories"
     );
     devLog("intent:" + interpretation.intent);
+
+    conversationState[userId] = { ...previousData, ...interpretation.data };
 
     switch (interpretation.intent) {
       case "add_income": {
@@ -352,13 +354,12 @@ router.post("/", async (req, res) => {
             paymentMethod: "default",
             status: "completed",
           });
-          devLog("Salvando nova receita:", newIncome);
           await newIncome.save();
           devLog("Enviando mensagem de confirmação ao usuário.");
           sendIncomeAddedMessage(twiml, { ...newIncome.toObject(), category: categoryDoc.name });
           await UserStats.findOneAndUpdate(
             { userId },
-            { $inc: { totalIncome: newAmount } },
+            { $inc: { totalIncome: amount } },
             { upsert: true }
           );
           break;
@@ -456,20 +457,25 @@ router.post("/", async (req, res) => {
         {
           const { days = 7 } = interpretation.data;
           try {
-            const reportData = await getExpensesReport(userId, days);
+            const daysToRequest = parseInt(days, 10);
+            const reportData = await getExpensesReport(userId, daysToRequest);
 
-            if (reportData.length === 0) {
+            if (reportData.length === 0 && daysToRequest <= 7) { 
               twiml.message(
-                `📉 Não há registros de gastos nos últimos ${days} dias.`
+                `📉 Não há registros de gastos nos últimos ${daysToRequest} dias.`
               );
             } else {
-              const imageUrl = await generateChart(reportData, userId);
-              await sendReportImage(userId, imageUrl);
+              const imageUrl = await generateChart(
+                reportData,
+                userId,
+                daysToRequest
+              );
+              twiml.message().media(imageUrl);
             }
           } catch (error) {
             devLog("Erro ao gerar gráfico:", error);
             twiml.message(
-              "❌ Ocorreu um erro ao gerar o relatório. Tente novamente."
+              `📉 Desculpe, não foi possível gerar o gráfico.\n\nMotivo: ${error}`
             );
           }
         }
@@ -486,11 +492,11 @@ router.post("/", async (req, res) => {
                 `📊 Não há registros de gastos nos últimos ${days} dias para gerar um relatório por categoria.`
               );
             } else {
-              const imageFilename = await generateCategoryChart(
+              const imageUrl = await generateCategoryChart( 
                 categoryReport,
                 userId
               );
-              await sendReportImage(userId, imageFilename);
+              twiml.message().media(imageUrl);
             }
           } catch (error) {
             devLog("Erro ao gerar gráfico por categorias:", error);
@@ -500,70 +506,135 @@ router.post("/", async (req, res) => {
           }
         }
         break;
+      
+        case "get_total": {
+        let { category, month, monthName } = interpretation.data;
 
-      case "get_total":
-        {
-          const { category, type } = interpretation.data;
-          console.log("Tipo:", type, "Categoria:", category);
-          const total = await calculateTotalExpenses(userId, category, type);
-          sendTotalExpensesMessage(twiml, total, category, type);
+        if (!month || !monthName) {
+          const now = new Date();
+          const currentYear = now.getFullYear();
+          const currentMonth = String(now.getMonth() + 1).padStart(2, "0");
+          month = `${currentYear}-${currentMonth}`;
+          const monthNameRaw = now.toLocaleString("pt-BR", { month: "long" });
+          monthName =
+            monthNameRaw.charAt(0).toUpperCase() + monthNameRaw.slice(1);
         }
-        break;
 
-      case "get_total_income":
-        const totalIncome = await getCurrentTotalIncome(userId);
-        sendTotalIncomeMessage(twiml, totalIncome);
-        break;
+        const total = await calculateTotalExpenses(userId, category, month);
 
-      case "get_total_all":
-        const totalAll = await getCurrentTotalSpent(userId);
-        sendTotalExpensesAllMessage(twiml, totalAll);
-        break;
+        let responseMessage;
+        if (category) {
+          responseMessage = `📉 *Gasto total* em _*${
+            category.charAt(0).toUpperCase() + category.slice(1)
+          }*_ no mês de _*${monthName}*_: \nR$ ${total.toFixed(2)}`;
+        } else {
+          responseMessage = `📉 *Gasto total* no mês de _*${monthName}*_: \nR$ ${total.toFixed(
+            2
+          )}`;
+        }
 
-      case "get_total_last_months":
-        {
-          const { monthName, month: interpretationDataMonth } =
-            interpretation.data;
-          const getCurrentMonthFormatted = () => {
-            const date = new Date();
-            const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, "0");
-            return `${year}-${month}`;
+        if (total > 0) {
+          responseMessage += `.\n\nDigite "detalhes" para ver a lista de itens.`;
+
+          conversationState[userId] = {
+            type: "expense",
+            category,
+            month,
+            monthName,
           };
-
-          const currentMonth = getCurrentMonthFormatted();
-
-          if (
-            interpretationDataMonth < "2025-01" ||
-            interpretationDataMonth > currentMonth
-          ) {
-            twiml.message("🚫 Mês inválido. Tente novamente.");
-            break;
-          } else {
-            const spendingHistoryLastMonths = await UserStats.aggregate([
-              { $match: { userId } },
-              { $unwind: "$spendingHistory" },
-              { $match: { "spendingHistory.month": interpretationDataMonth } },
-              {
-                $group: {
-                  _id: null,
-                  total: { $sum: "$spendingHistory.amount" },
-                },
-              },
-            ]);
-
-            sendTotalExpensesLastMonthsMessage(
-              twiml,
-              spendingHistoryLastMonths,
-              monthName
-            );
-          }
         }
-        break;
 
-      case "greeting":
+        twiml.message(responseMessage);
+
+        break;
+      }
+
+      case "get_total_income": {
+        let { category, month, monthName } = interpretation.data;
+
+        if (!month || !monthName) {
+          const now = new Date();
+          const currentYear = now.getFullYear();
+          const currentMonth = String(now.getMonth() + 1).padStart(2, "0");
+          month = `${currentYear}-${currentMonth}`;
+          const monthNameRaw = now.toLocaleString("pt-BR", { month: "long" });
+          monthName =
+            monthNameRaw.charAt(0).toUpperCase() + monthNameRaw.slice(1);
+        }
+
+        const totalIncome = await calculateTotalIncome(userId, month, category);
+
+        let responseMessage;
+        if (category) {
+          responseMessage = `📈 *Receita total* de _*${
+            category.charAt(0).toUpperCase() + category.slice(1)
+          }*_ no mês de _*${monthName}*_: \nR$ ${totalIncome.toFixed(2)}`;
+        } else {
+          responseMessage = `📈 *Receita total* no mês de _*${monthName}*_: \nR$ ${totalIncome.toFixed(
+            2
+          )}`;
+        }
+
+        if (totalIncome > 0) {
+          responseMessage += `.\n\nDigite "detalhes" para ver a lista de itens.`;
+
+          conversationState[userId] = {
+            type: "income",
+            category,
+            month,
+            monthName,
+          };
+        }
+
+        twiml.message(responseMessage);
+        break;
+      }
+
+      case "detalhes": {
+        const previousData = conversationState[userId];
+
+        if (!previousData || !previousData.type || !previousData.month) {
+          twiml.message(
+            "🚫 Não há um relatório recente para detalhar. Por favor, peça um total de gastos ou receitas primeiro."
+          );
+          break;
+        }
+
+        const { type, category, month, monthName } = previousData;
+
+        devLog("Iniciando 'detalhes' com o contexto salvo:", previousData);
+
+        let detalhesMessage;
+
+        if (type === "income") {
+          devLog("Chamando getIncomeDetails...");
+          detalhesMessage = await getIncomeDetails(
+            userId,
+            month,
+            monthName,
+            category
+          );
+        } else {
+          devLog("Chamando getExpenseDetails...");
+          detalhesMessage = await getExpenseDetails(
+            userId,
+            month,
+            monthName,
+            category
+          );
+        }
+
+        twiml.message(detalhesMessage);
+
+        delete conversationState[userId];
+
+        break;
+      }
+
+      case "greeting": {
         sendGreetingMessage(twiml);
         break;
+      }
 
       case "reminder":
         const { description, date } = interpretation.data;
