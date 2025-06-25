@@ -13,6 +13,7 @@ import {
   getExpenseDetails,
   getIncomeDetails,
   getOrCreateCategory,
+  getOrCreatePaymentMethod,
 } from "../helpers/totalUtils.js";
 import {
   generateChart,
@@ -119,6 +120,8 @@ router.post("/", async (req, res) => {
           finalCategoryName
         ); // << MUDANÇA
 
+        const paymentMethodDoc = await getOrCreatePaymentMethod("pix");
+
         const newIncome = new Transaction({
           userId: userDbId, // << MUDANÇA
           amount,
@@ -127,7 +130,7 @@ router.post("/", async (req, res) => {
           type: "income",
           date: new Date(),
           messageId: generateId(),
-          paymentMethod: "default",
+          paymentMethodId: paymentMethodDoc._id.toString(),
           status: "completed",
         });
 
@@ -162,6 +165,8 @@ router.post("/", async (req, res) => {
           finalCategoryName
         ); // << MUDANÇA
 
+        const paymentMethodDoc = await getOrCreatePaymentMethod("pix");
+
         const newExpense = new Transaction({
           userId: userDbId, // << MUDANÇA
           amount,
@@ -170,7 +175,7 @@ router.post("/", async (req, res) => {
           type: "expense",
           date: new Date(),
           messageId: generateId(),
-          paymentMethod: "default",
+          paymentMethodId: paymentMethodDoc._id.toString(),
           status: "completed",
         });
 
@@ -237,6 +242,7 @@ router.post("/", async (req, res) => {
         }
 
         const categoryDoc = await getOrCreateCategory(userDbId, newCategory); // << MUDANÇA
+        const paymentMethodDoc = await getOrCreatePaymentMethod("pix");
         const newTransaction = new Transaction({
           userId: userDbId, // << MUDANÇA
           amount: newAmount,
@@ -245,7 +251,7 @@ router.post("/", async (req, res) => {
           type: newType,
           date: new Date(),
           messageId: generateId(),
-          paymentMethod: "default",
+          paymentMethodId: paymentMethodDoc._id.toString(),
           status: "completed",
         });
 

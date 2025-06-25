@@ -2,6 +2,7 @@
 
 import Transaction from "../models/Transaction.js";
 import Category from "../models/Category.js";
+import PaymentMethods from "../models/paymentmethods.js";
 import Reminder from "../models/Reminder.js";
 import { TIMEZONE, formatInBrazil } from "../utils/dateUtils.js";
 import mongoose from "mongoose";
@@ -280,4 +281,14 @@ export async function getTotalReminders(userId) {
     .join("\n\n");
 
   return `🔔 *Seus próximos lembretes:*\n\n${allFutureReminders}`;
+}
+
+export async function getOrCreatePaymentMethod(paymentMethodType) {
+  const standardizedType = paymentMethodType.trim().toLowerCase();
+  let paymentMethod = await PaymentMethods.findOne({ type: standardizedType });
+  if (!paymentMethod) {
+    paymentMethod = new PaymentMethods({ type: standardizedType });
+    await paymentMethod.save();
+  }
+  return paymentMethod;
 }
