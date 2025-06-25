@@ -1,12 +1,9 @@
-// src/helpers/totalUtils.js
-
 import Transaction from "../models/Transaction.js";
 import Category from "../models/Category.js";
 import Reminder from "../models/Reminder.js";
 import { TIMEZONE, formatInBrazil } from "../utils/dateUtils.js";
 import mongoose from "mongoose";
 
-// Helper para converter string para ObjectId com segurança
 const toObjectId = (idString) => new mongoose.Types.ObjectId(idString);
 
 export async function calculateTotalIncome(userId, month = null, categoryName = null) {
@@ -33,7 +30,7 @@ export async function calculateTotalIncome(userId, month = null, categoryName = 
           as: "categoryDoc"
         }
       });
-      pipeline.push({ $match: { "categoryDoc": { $ne: [] } } }); // Garante que só passem transações com a categoria encontrada
+      pipeline.push({ $match: { "categoryDoc": { $ne: [] } } });
     }
     
     pipeline.push({ $group: { _id: null, total: { $sum: "$amount" } } });
@@ -148,7 +145,6 @@ export async function getExpenseDetails(userId, month, monthName, categoryName) 
       { $unwind: '$category' }
     ];
 
-    // Se uma categoria for especificada, filtramos *após* o lookup
     if (categoryName) {
         pipeline.push({
             $match: { 'category.name': { $regex: new RegExp(`^${categoryName.trim()}$`, "i") } }

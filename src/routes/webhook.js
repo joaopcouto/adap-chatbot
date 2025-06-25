@@ -18,13 +18,9 @@ import {
   generateChart,
   generateCategoryChart,
 } from "../services/chartService.js";
-// sendReportImage não está sendo usado, pode ser removido se desejar
-// import { sendReportImage } from "../services/twilioService.js";
 import Transaction from "../models/Transaction.js";
 import Category from "../models/Category.js";
 import UserStats from "../models/UserStats.js";
-// Permissions não está sendo usado, pode ser removido se desejar
-// import Permissions from "../models/Permissions.js";
 import { customAlphabet } from "nanoid";
 import {
   sendGreetingMessage,
@@ -54,13 +50,11 @@ let conversationState = {};
 router.post("/", async (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
   const userMessage = req.body.Body;
-  // << MUDANÇA: Renomeado para maior clareza
   const userPhoneNumber = fixPhoneNumber(req.body.From);
 
   console.log(userPhoneNumber);
 
-  // Check if user exists in database
-  const { authorized, user } = await validateUserAccess(userPhoneNumber); // << MUDANÇA
+  const { authorized, user } = await validateUserAccess(userPhoneNumber); 
 
   if (!authorized) {
     twiml.message(
@@ -70,15 +64,14 @@ router.post("/", async (req, res) => {
     return res.end(twiml.toString());
   }
 
-  // << MUDANÇA: Esta será a nossa principal variável para o ID do usuário no DB
   const userDbId = user._id.toString();
   devLog(`User DB ID: ${userDbId}`);
 
-  const previousData = conversationState[userDbId] || {}; // << MUDANÇA: Usar o ID do DB para o estado
+  const previousData = conversationState[userDbId] || {}; 
   const userStats = await UserStats.findOne(
     { userId: userDbId },
     { blocked: 1 }
-  ); // << MUDANÇA
+  ); 
 
   if (userStats?.blocked) {
     twiml.message("🚫 Você está bloqueado de usar a ADAP.");
@@ -93,15 +86,13 @@ router.post("/", async (req, res) => {
     const userHasFreeCategorization = await hasAccessToFeature(
       userDbId,
       "categories"
-    ); // << MUDANÇA
+    ); 
     devLog("intent:" + interpretation.intent);
 
-    conversationState[userDbId] = { ...previousData, ...interpretation.data }; // << MUDANÇA
+    conversationState[userDbId] = { ...previousData, ...interpretation.data };
 
     switch (interpretation.intent) {
-      // ... (outros cases)
 
-      // EXEMPLO DE MUDANÇA EM UM CASE:
       case "add_income": {
         const { amount, description, category } = interpretation.data;
         devLog(amount, description, category);
@@ -117,10 +108,10 @@ router.post("/", async (req, res) => {
         const categoryDoc = await getOrCreateCategory(
           userDbId,
           finalCategoryName
-        ); // << MUDANÇA
+        ); 
 
         const newIncome = new Transaction({
-          userId: userDbId, // << MUDANÇA
+          userId: userDbId, 
           amount,
           description,
           categoryId: categoryDoc._id.toString(),
@@ -140,7 +131,7 @@ router.post("/", async (req, res) => {
           { userId: userDbId },
           { $inc: { totalIncome: amount } },
           { upsert: true }
-        ); // << MUDANÇA
+        ); 
 
         break;
       }
@@ -160,10 +151,10 @@ router.post("/", async (req, res) => {
         const categoryDoc = await getOrCreateCategory(
           userDbId,
           finalCategoryName
-        ); // << MUDANÇA
+        ); 
 
         const newExpense = new Transaction({
-          userId: userDbId, // << MUDANÇA
+          userId: userDbId, 
           amount,
           description,
           categoryId: categoryDoc._id.toString(),
@@ -184,7 +175,7 @@ router.post("/", async (req, res) => {
           { userId: userDbId },
           { $inc: { totalSpent: amount } },
           { upsert: true }
-        ); // << MUDANÇA
+        );
 
         break;
       }
@@ -236,9 +227,9 @@ router.post("/", async (req, res) => {
           break;
         }
 
-        const categoryDoc = await getOrCreateCategory(userDbId, newCategory); // << MUDANÇA
+        const categoryDoc = await getOrCreateCategory(userDbId, newCategory);
         const newTransaction = new Transaction({
-          userId: userDbId, // << MUDANÇA
+          userId: userDbId, 
           amount: newAmount,
           description: newDescription,
           categoryId: categoryDoc._id.toString(),
@@ -261,7 +252,7 @@ router.post("/", async (req, res) => {
             { userId: userDbId },
             { $inc: { totalIncome: newAmount } },
             { upsert: true }
-          ); // << MUDANÇA
+          ); 
         } else {
           sendExpenseAddedMessage(twiml, {
             ...newTransaction.toObject(),
@@ -271,7 +262,7 @@ router.post("/", async (req, res) => {
             { userId: userDbId },
             { $inc: { totalSpent: newAmount } },
             { upsert: true }
-          ); // << MUDANÇA
+          ); 
         }
 
         break;
@@ -279,7 +270,6 @@ router.post("/", async (req, res) => {
 
       case "delete_transaction": {
         const { messageId } = interpretation.data;
-        // << MUDANÇA: Usar userDbId em todas as queries
         const transaction = await Transaction.findOne({
           userId: userDbId,
           messageId,
@@ -332,8 +322,7 @@ router.post("/", async (req, res) => {
       case "generate_daily_chart": {
         const { days = 7 } = interpretation.data;
         const daysToRequest = parseInt(days, 10);
-        const reportData = await getExpensesReport(userDbId, daysToRequest); // << MUDANÇA
-        // ... resto da lógica
+        const reportData = await getExpensesReport(userDbId, daysToRequest);
         if (reportData.length === 0) {
           twiml.message(
             `📉 Não há registros de gastos nos últimos ${daysToRequest} dias.`
@@ -351,8 +340,7 @@ router.post("/", async (req, res) => {
 
       case "generate_category_chart": {
         const { days = 30 } = interpretation.data;
-        const categoryReport = await getCategoryReport(userDbId, days); // << MUDANÇA
-        // ... resto da lógica
+        const categoryReport = await getCategoryReport(userDbId, days); 
         if (categoryReport.length === 0) {
           twiml.message(
             `📊 Não há registros de gastos nos últimos ${days} dias para gerar um relatório por categoria.`
@@ -370,7 +358,6 @@ router.post("/", async (req, res) => {
       case "get_total": {
         let { category, month, monthName } = interpretation.data;
 
-        // Garante que sempre temos um mês e nome de mês válidos
         if (!month || !monthName) {
           const now = new Date();
           const currentYear = now.getFullYear();
@@ -383,7 +370,6 @@ router.post("/", async (req, res) => {
 
         const total = await calculateTotalExpenses(userDbId, category, month);
 
-        // << MUDANÇA PRINCIPAL: Trata o caso de total zero separadamente >>
         if (total === 0) {
           let zeroMessage;
           if (category) {
@@ -395,7 +381,6 @@ router.post("/", async (req, res) => {
           }
           twiml.message(zeroMessage);
         } else {
-          // Se total > 0, fazemos a lógica completa
           let responseMessage;
           if (category) {
             const catFormatted =
@@ -425,7 +410,6 @@ router.post("/", async (req, res) => {
       case "get_total_income": {
         let { category, month, monthName } = interpretation.data;
 
-        // Garante que sempre temos um mês e nome de mês válidos
         if (!month || !monthName) {
           const now = new Date();
           const currentYear = now.getFullYear();
@@ -442,7 +426,6 @@ router.post("/", async (req, res) => {
           category
         );
 
-        // << MUDANÇA PRINCIPAL: Trata o caso de total zero separadamente >>
         if (totalIncome === 0) {
           let zeroMessage;
           if (category) {
@@ -454,7 +437,6 @@ router.post("/", async (req, res) => {
           }
           twiml.message(zeroMessage);
         } else {
-          // Se total > 0, fazemos a lógica completa
           let responseMessage;
           if (category) {
             const catFormatted =
@@ -482,8 +464,7 @@ router.post("/", async (req, res) => {
       }
 
       case "detalhes": {
-        const previousData = conversationState[userDbId]; // << MUDANÇA
-        // ...
+        const previousData = conversationState[userDbId];
         const { type, category, month, monthName } = previousData;
         let detalhesMessage;
         if (type === "income") {
@@ -492,26 +473,24 @@ router.post("/", async (req, res) => {
             month,
             monthName,
             category
-          ); // << MUDANÇA
+          );
         } else {
           detalhesMessage = await getExpenseDetails(
             userDbId,
             month,
             monthName,
             category
-          ); // << MUDANÇA
+          );
         }
         twiml.message(detalhesMessage);
-        delete conversationState[userDbId]; // << MUDANÇA
+        delete conversationState[userDbId];
         break;
       }
-
-      // ... (outros cases, como greeting e financial_help não precisam de mudança)
 
       case "reminder": {
         const { description, date } = interpretation.data;
         const newReminder = new Reminder({
-          userId: userDbId, // << MUDANÇA
+          userId: userDbId, 
           description: description,
           date: date,
           messageId: generateId(),
@@ -523,7 +502,6 @@ router.post("/", async (req, res) => {
 
       case "delete_reminder": {
         const { messageId } = interpretation.data;
-        // << MUDANÇA: Usar userDbId em todas as queries
         const reminder = await Reminder.findOneAndDelete({
           userId: userDbId,
           messageId,
@@ -535,14 +513,13 @@ router.post("/", async (req, res) => {
       }
 
       case "get_total_reminders": {
-        const totalReminders = await getTotalReminders(userDbId); // << MUDANÇA
+        const totalReminders = await getTotalReminders(userDbId); 
         sendTotalRemindersMessage(twiml, totalReminders);
         break;
       }
 
       case "financial_help": {
         if (!(await hasAccessToFeature(userDbId, "adap-turbo"))) {
-          // << MUDANÇA
           twiml.message(
             "🚫 Este recurso está disponível como um complemento pago. (...)"
           );
