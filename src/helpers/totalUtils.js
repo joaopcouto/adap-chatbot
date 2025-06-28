@@ -6,13 +6,6 @@ import mongoose from "mongoose";
 
 const MESSAGE_LIMIT = 1550; // Limite seguro, um pouco abaixo dos 1600 do WhatsApp
 
-/**
- * FUNÇÃO AUXILIAR REVISADA E RENOMEADA
- * Particiona um array de linhas de texto em várias mensagens.
- * @param {string[]} lines - Array de strings, onde cada string é uma linha do relatório.
- * @returns {string[]} Um array de mensagens prontas para enviar.
- */
-
 function chunkLinesIntoMessages(lines) {
   if (!lines || lines.length === 0) {
     return [];
@@ -53,25 +46,30 @@ function chunkLinesIntoMessages(lines) {
   return finalMessages;
 }
 
-const toObjectId = (idString) => new mongoose.Types.ObjectId(idString);
-
 export async function calculateTotalIncome(
-  userId,
+  userId, // Recebe o ObjectId
   month = null,
   categoryName = null
 ) {
   try {
     const pipeline = [];
 
-    let initialMatch = { userId, type: "income" };
+    // GARANTE QUE O FILTRO É FEITO COM ObjectId
+    let initialMatch = {
+      userId: new mongoose.Types.ObjectId(userId),
+      type: "income",
+      status: { $in: ["completed", "pending"] },
+    };
+
     if (month) {
+      // Esta lógica já é robusta e lida bem com timezone, vamos mantê-la
       initialMatch.$expr = {
         $eq: [
           {
             $dateToString: {
               format: "%Y-%m",
               date: "$date",
-              timezone: TIMEZONE,
+              timezone: TIMEZONE, // Use a sua constante de timezone
             },
           },
           month,
@@ -81,18 +79,15 @@ export async function calculateTotalIncome(
     pipeline.push({ $match: initialMatch });
 
     if (categoryName) {
+      // Este lookup está correto
       pipeline.push({
         $lookup: {
           from: "categories",
-          let: { category_id_str: "$categoryId" },
+          let: { category_id: "$categoryId" }, // Simplificado
           pipeline: [
             {
               $match: {
-                $expr: { $eq: ["$_id", { $toObjectId: "$$category_id_str" }] },
-              },
-            },
-            {
-              $match: {
+                $expr: { $eq: ["$_id", "$$category_id"] },
                 name: { $regex: new RegExp(`^${categoryName.trim()}$`, "i") },
               },
             },
@@ -113,42 +108,48 @@ export async function calculateTotalIncome(
 }
 
 export async function calculateTotalExpenses(
-  userId,
+  userId, // Recebe o ObjectId
   categoryName = null,
   month = null
 ) {
   try {
     const pipeline = [];
-    let initialMatch = { userId, type: "expense" };
+
+    // GARANTE QUE O FILTRO É FEITO COM ObjectId
+    const initialMatch = {
+      userId: new mongoose.Types.ObjectId(userId),
+      type: "expense",
+      status: { $in: ["completed", "pending"] },
+    };
+
     if (month) {
+      // USA A MESMA LÓGICA ROBUSTA DE INCOME PARA CONSISTÊNCIA E PRECISÃO DE TIMEZONE
       initialMatch.$expr = {
         $eq: [
           {
             $dateToString: {
               format: "%Y-%m",
               date: "$date",
-              timezone: TIMEZONE,
+              timezone: TIMEZONE, // Use a sua constante de timezone
             },
           },
           month,
         ],
       };
     }
+
     pipeline.push({ $match: initialMatch });
 
     if (categoryName) {
+      // Este lookup está correto
       pipeline.push({
         $lookup: {
           from: "categories",
-          let: { category_id_str: "$categoryId" },
+          let: { category_id: "$categoryId" }, // Simplificado
           pipeline: [
             {
               $match: {
-                $expr: { $eq: ["$_id", { $toObjectId: "$$category_id_str" }] },
-              },
-            },
-            {
-              $match: {
+                $expr: { $eq: ["$_id", "$$category_id"] },
                 name: { $regex: new RegExp(`^${categoryName.trim()}$`, "i") },
               },
             },
@@ -161,6 +162,7 @@ export async function calculateTotalExpenses(
 
     pipeline.push({ $group: { _id: null, total: { $sum: "$amount" } } });
     const result = await Transaction.aggregate(pipeline);
+
     return result.length > 0 ? result[0].total : 0;
   } catch (err) {
     console.error("Erro ao buscar total de gastos:", err);
@@ -173,7 +175,10 @@ export async function getExpensesReport(userId, days) {
   startDate.setDate(startDate.getDate() - (days + 1));
 
   return Transaction.aggregate([
-    { $match: { userId, type: "expense", date: { $gte: startDate } } },
+    {
+      $match: { userId, type: "expense", date: { $gte: startDate } },
+      status: { $in: ["completed", "pending"] },
+    },
     {
       $group: {
         _id: {
@@ -196,7 +201,10 @@ export async function getCategoryReport(userId, days) {
   startDate.setDate(startDate.getDate() - days);
 
   return Transaction.aggregate([
-    { $match: { userId, type: "expense", date: { $gte: startDate } } },
+    {
+      $match: { userId, type: "expense", date: { $gte: startDate } },
+      status: { $in: ["completed", "pending"] },
+    },
     {
       $lookup: {
         from: "categories",
@@ -228,7 +236,11 @@ export async function getExpenseDetails(
   categoryName
 ) {
   try {
-    let matchStage = { userId, type: "expense" };
+    let matchStage = {
+      userId: new mongoose.Types.ObjectId(userId),
+      type: "expense",
+      status: { $in: ["completed", "pending"] },
+    };
 
     if (month) {
       matchStage.$expr = {
@@ -296,9 +308,9 @@ export async function getExpenseDetails(
           expensesByCategory[cat] = [];
         }
         expensesByCategory[cat].push(
-          `\u00A0\u00A0\u00A0\u00A0💸 ${
-            expense.description
-          }: R$ ${expense.amount.toFixed(2)} (#_${expense.messageId}_)`
+          ` 💸 ${expense.description}: R$ ${expense.amount.toFixed(2)} (#${
+            expense.messageId
+          })`
         );
       });
 
@@ -310,16 +322,15 @@ export async function getExpenseDetails(
         reportLines.push(...expensesByCategory[cat]);
         i++;
       }
-
     } else {
       reportLines.push(
         `🧾 Detalhes dos gastos em _*${categoryName}*_ no mês de _*${monthName}*_:`
       );
       const expenseItems = expenses.map(
         (expense) =>
-          `\u00A0\u00A0\u00A0\u00A0💸 ${
-            expense.description
-          }: R$ ${expense.amount.toFixed(2)} (#_${expense.messageId}_)`
+          ` 💸 ${expense.description}: R$ ${expense.amount.toFixed(2)} (#${
+            expense.messageId
+          })`
       );
       reportLines.push(...expenseItems);
     }
@@ -333,7 +344,10 @@ export async function getExpenseDetails(
 
 export async function getIncomeDetails(userId, month, monthName, categoryName) {
   try {
-    let matchStage = { userId, type: "income" };
+    let matchStage = {
+      userId: new mongoose.Types.ObjectId(userId),
+      type: "income",
+    };
     if (month) {
       matchStage.$expr = {
         $eq: [
@@ -398,11 +412,11 @@ export async function getIncomeDetails(userId, month, monthName, categoryName) {
       const catName =
         income.category.name.charAt(0).toUpperCase() +
         income.category.name.slice(1);
-      return `\u00A0\u00A0\u00A0\u00A0💰 ${
+      return ` 💰 ${
         income.description
-      } (em _${catName}_): R$ ${income.amount.toFixed(2)} (#_${
+      } (em _${catName}_): R$ ${income.amount.toFixed(2)} (#${
         income.messageId
-      }_)`;
+      })`;
     });
 
     reportLines.push(...incomeItems);
@@ -449,4 +463,64 @@ export async function getTotalReminders(userId) {
     .join("\n\n");
 
   return `🔔 *Seus próximos lembretes:*\n\n${allFutureReminders}`;
+}
+
+export async function getActiveInstallments(userId) {
+  try {
+    const activeInstallments = await Transaction.aggregate([
+      // 1. Filtrar apenas as transações relevantes
+      {
+        $match: {
+          userId: new mongoose.Types.ObjectId(userId),
+          status: "pending", // Apenas parcelas futuras/não pagas
+          installmentsGroupId: { $ne: null }, // Garante que é uma parcela
+        },
+      },
+      // 2. Ordenar para que a primeira parcela de cada grupo venha primeiro
+      {
+        $sort: {
+          installmentsCurrent: 1,
+        },
+      },
+      // 3. Agrupar pelo ID do parcelamento
+      {
+        $group: {
+          _id: "$installmentsGroupId", // Agrupa por parcelamento
+          description: { $first: "$description" }, // Pega a descrição da primeira parcela
+          totalInstallments: { $first: "$installmentsCount" }, // Pega o número total de parcelas
+          installmentAmount: { $first: "$amount" }, // Pega o valor de uma parcela
+          pendingCount: { $sum: 1 }, // Conta quantas parcelas ainda estão pendentes
+        },
+      },
+      // 4. Formatar a saída para ser mais amigável
+      {
+        $project: {
+          _id: 0, // Remove o campo _id do resultado
+          groupId: "$_id",
+          // Limpa a descrição para mostrar apenas o nome do item (ex: "ps5")
+          description: {
+            $trim: {
+              input: {
+                $arrayElemAt: [{ $split: ["$description", " - "] }, 0],
+              },
+            },
+          },
+          totalInstallments: "$totalInstallments",
+          installmentAmount: "$installmentAmount",
+          pendingCount: "$pendingCount",
+        },
+      },
+      // 5. Ordenar a lista final por descrição
+      {
+        $sort: {
+          description: 1,
+        },
+      },
+    ]);
+
+    return activeInstallments;
+  } catch (error) {
+    console.error("Erro ao buscar parcelamentos ativos:", error);
+    return []; // Retorna um array vazio em caso de erro
+  }
 }
