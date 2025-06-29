@@ -468,59 +468,84 @@ export async function getTotalReminders(userId) {
 export async function getActiveInstallments(userId) {
   try {
     const activeInstallments = await Transaction.aggregate([
-      // 1. Filtrar apenas as transações relevantes
+      // 1. Filtrar transações de parcelamento do usuário que AINDA TÊM parcelas pendentes.
+      // Primeiro, encontramos todos os grupos que têm pelo menos uma parcela pendente.
       {
         $match: {
           userId: new mongoose.Types.ObjectId(userId),
-          status: "pending", // Apenas parcelas futuras/não pagas
-          installmentsGroupId: { $ne: null }, // Garante que é uma parcela
-        },
+          installmentsGroupId: { $ne: null },
+          status: "pending"
+        }
       },
-      // 2. Ordenar para que a primeira parcela de cada grupo venha primeiro
-      {
-        $sort: {
-          installmentsCurrent: 1,
-        },
-      },
-      // 3. Agrupar pelo ID do parcelamento
       {
         $group: {
-          _id: "$installmentsGroupId", // Agrupa por parcelamento
-          description: { $first: "$description" }, // Pega a descrição da primeira parcela
-          totalInstallments: { $first: "$installmentsCount" }, // Pega o número total de parcelas
-          installmentAmount: { $first: "$amount" }, // Pega o valor de uma parcela
-          pendingCount: { $sum: 1 }, // Conta quantas parcelas ainda estão pendentes
-        },
+          _id: "$installmentsGroupId"
+        }
       },
-      // 4. Formatar a saída para ser mais amigável
+      // Agora, usamos esses IDs de grupo para buscar TODAS as parcelas (pending e completed) desses grupos.
+      {
+        $lookup: {
+          from: "transactions",
+          let: { groupId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ["$installmentsGroupId", "$$groupId"] }
+              }
+            },
+            {
+              $sort: { installmentsCurrent: 1 }
+            }
+          ],
+          as: "installments"
+        }
+      },
+      {
+        $unwind: "$installments"
+      },
+      // 2. Substitui a raiz do documento pelos dados das parcelas
+      {
+        $replaceRoot: { newRoot: "$installments" }
+      },
+      // 3. Agora agrupamos como antes, mas com uma lógica de contagem diferente
+      {
+        $group: {
+          _id: "$installmentsGroupId",
+          description: { $first: "$description" },
+          totalInstallments: { $first: "$installmentsCount" },
+          installmentAmount: { $first: "$amount" },
+          // CONTA PENDENTES: Soma 1 para cada parcela com status "pending"
+          pendingCount: {
+            $sum: {
+              $cond: [{ $eq: ["$status", "pending"] }, 1, 0]
+            }
+          }
+        }
+      },
+      // 4. Formatar a saída
       {
         $project: {
-          _id: 0, // Remove o campo _id do resultado
+          _id: 0,
           groupId: "$_id",
-          // Limpa a descrição para mostrar apenas o nome do item (ex: "ps5")
           description: {
             $trim: {
-              input: {
-                $arrayElemAt: [{ $split: ["$description", " - "] }, 0],
-              },
-            },
+              input: { $arrayElemAt: [{ $split: ["$description", " - "] }, 0] }
+            }
           },
           totalInstallments: "$totalInstallments",
           installmentAmount: "$installmentAmount",
-          pendingCount: "$pendingCount",
-        },
+          pendingCount: "$pendingCount"
+        }
       },
-      // 5. Ordenar a lista final por descrição
+      // 5. Ordenar a lista final
       {
-        $sort: {
-          description: 1,
-        },
-      },
+        $sort: { description: 1 }
+      }
     ]);
 
     return activeInstallments;
   } catch (error) {
     console.error("Erro ao buscar parcelamentos ativos:", error);
-    return []; // Retorna um array vazio em caso de erro
+    return [];
   }
 }

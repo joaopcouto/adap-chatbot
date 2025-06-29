@@ -121,8 +121,8 @@ export async function interpretMessageWithAI(message, currentDate) {
       Response: { "intent": "add_installment_expense", "data": { "totalAmount": 2000, "description": "celular", "installments": 12, "category": "gastos fixos" } }
     - User: "600 de passagem aérea em 3x"
       Response: { "intent": "add_installment_expense", "data": { "totalAmount": 600, "description": "passagem aérea", "installments": 3, "category": null } }
-    - User: "comprei uma televisão de 2400 em 4 vezes"
-      Response: { "intent": "add_installment_expense", "data": { "totalAmount": 2400, "description": "televisão", "installments": 4, "category": null } }
+    - User: "comprei uma televisão de 2400 em 4 vezes na categoria eletrônicos"
+      Response: { "intent": "add_installment_expense", "data": { "totalAmount": 2400, "description": "televisão", "installments": 4, "category": eletrônicos } }
      
     - User: "Remover gasto #4cdc9"
       Response: { "intent": "delete_transaction", "data": { "messageId": "4cdc9" } }

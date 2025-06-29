@@ -126,30 +126,23 @@ router.post("/", async (req, res) => {
             }
 
             const transactionsToCreate = [];
-            const purchaseDate = new Date(); // Data da compra é hoje (ex: 28/06/2025)
-
-            // --- LÓGICA DE DATA CORRIGIDA E ROBUSTA ---
+            const purchaseDate = new Date(); 
             let startingMonthOffset = 0;
-            // Se o dia da compra (28) for MAIOR OU IGUAL ao dia do vencimento (ex: 15),
-            // a primeira parcela cai no próximo mês.
             if (purchaseDate.getDate() >= dueDay) {
               startingMonthOffset = 1;
             }
-            // Se o dia da compra (28) for MENOR que o dia do vencimento (ex: 29),
-            // a primeira parcela cai no mês atual. (startingMonthOffset permanece 0)
 
             for (let i = 0; i < installments; i++) {
               const paymentDate = new Date(purchaseDate);
-              paymentDate.setHours(0, 0, 0, 0); // Zera a hora para consistência
+              paymentDate.setHours(0, 0, 0, 0); 
 
-              // Adiciona o offset inicial + o número da parcela atual
               paymentDate.setMonth(
                 purchaseDate.getMonth() + i + startingMonthOffset
               );
               paymentDate.setDate(dueDay);
 
               transactionsToCreate.push({
-                userId: user._id, // Usar o ObjectId diretamente
+                userId: user._id,
                 amount: installmentAmount,
                 description: `${description} - ${i + 1}/${installments}`,
                 date: paymentDate,
@@ -468,7 +461,6 @@ router.post("/", async (req, res) => {
               }
 
               try {
-                // Encontra as transações pelo ID do grupo
                 const transactions = await Transaction.find({
                   userId: userObjectId,
                   installmentsGroupId: installmentsGroupId,
@@ -481,16 +473,13 @@ router.post("/", async (req, res) => {
                   break;
                 }
 
-                // Pega a descrição da primeira transação para a mensagem de confirmação
                 const description = transactions[0].description.split(" - ")[0];
 
-                // Deleta todas as transações que correspondem ao critério
                 const deleteResult = await Transaction.deleteMany({
                   userId: userObjectId,
                   installmentsGroupId: installmentsGroupId,
                 });
 
-                // Reverte o valor total do UserStats
                 const totalAmountReverted = transactions.reduce(
                   (sum, t) => sum + t.amount,
                   0
@@ -528,7 +517,6 @@ router.post("/", async (req, res) => {
                 break;
               }
 
-              // --- NOVA VERIFICAÇÃO AQUI ---
               if (transaction.installmentsGroupId) {
                 twiml.message(
                   `🚫 A transação #_${messageId}_ faz parte de um parcelamento. Para removê-la, você precisa excluir o parcelamento inteiro.\n\n` +
