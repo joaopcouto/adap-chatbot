@@ -5,6 +5,7 @@ import rateLimitMongo from "rate-limit-mongo";
 import { connectToDatabase } from "./src/config/database.js";
 import webhookRouter from "./src/routes/webhook.js";
 import { startInstallmentReminderJob } from "./src/jobs/installmentReminderJob.js";
+import { startReminderJob } from './src/jobs/reminderJob.js'; 
 
 const app = express();
 app.use("/images", express.static("/tmp"));
@@ -41,6 +42,7 @@ connectToDatabase()
   .then(() => {
     console.log("✅ MongoDB conectado");
     startInstallmentReminderJob(); // INICIA O NOVO JOB
+    startReminderJob();
   })
   .catch((err) => console.error("❌ Erro na conexão:", err));
 

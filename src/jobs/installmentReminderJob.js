@@ -52,7 +52,6 @@ const processInstallmentReminders = async () => {
           devLog(
             `Lembrete enviado com sucesso para ${transaction.userId.phoneNumber} sobre "${transaction.description}"`
           );
-          // --- NOVO: ATUALIZA O STATUS DA PARCELA ---
           await Transaction.updateOne(
             { _id: transaction._id },
             { $set: { status: "completed" } }
@@ -60,7 +59,6 @@ const processInstallmentReminders = async () => {
           devLog(
             `Status da transação ${transaction._id} atualizado para 'completed'.`
           );
-          // ------------------------------------------
         } catch (sendError) {
           devLog(
             `[CRON JOB] Falha ao ENVIAR lembrete para ${transaction.userId.phoneNumber}. Erro:`,

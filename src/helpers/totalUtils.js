@@ -1,10 +1,14 @@
 import Transaction from "../models/Transaction.js";
 import Category from "../models/Category.js";
 import Reminder from "../models/Reminder.js";
-import { TIMEZONE, formatInBrazil } from "../utils/dateUtils.js";
+import {
+  TIMEZONE,
+  formatInBrazil,
+  formatInBrazilWithTime,
+} from "../utils/dateUtils.js";
 import mongoose from "mongoose";
 
-const MESSAGE_LIMIT = 1550; // Limite seguro, um pouco abaixo dos 1600 do WhatsApp
+const MESSAGE_LIMIT = 1550; 
 
 function chunkLinesIntoMessages(lines) {
   if (!lines || lines.length === 0) {
@@ -12,13 +16,11 @@ function chunkLinesIntoMessages(lines) {
   }
 
   const chunks = [];
-  // O cabeçalho agora fica fora do bloco de código para não usar a fonte monoespaçada.
-  const header = lines.shift(); // Remove a primeira linha (cabeçalho) e a guarda.
+  const header = lines.shift(); 
   let currentMessageBody = "";
 
   for (const line of lines) {
     if (currentMessageBody.length + line.length + 1 > MESSAGE_LIMIT - 10) {
-      // -10 para dar margem para as crases e \n
       chunks.push(currentMessageBody);
       currentMessageBody = line;
     } else {
@@ -33,12 +35,8 @@ function chunkLinesIntoMessages(lines) {
     chunks.push(currentMessageBody);
   }
 
-  // Agora, montamos as mensagens finais
   const finalMessages = [];
-  // Adiciona o cabeçalho como a primeira mensagem, sem formatação de código
   finalMessages.push(header);
-
-  // Adiciona os outros pedaços, cada um dentro de um bloco de código
   for (const chunk of chunks) {
     finalMessages.push("```\n" + chunk + "\n```");
   }
@@ -47,14 +45,12 @@ function chunkLinesIntoMessages(lines) {
 }
 
 export async function calculateTotalIncome(
-  userId, // Recebe o ObjectId
+  userId, 
   month = null,
   categoryName = null
 ) {
   try {
     const pipeline = [];
-
-    // GARANTE QUE O FILTRO É FEITO COM ObjectId
     let initialMatch = {
       userId: new mongoose.Types.ObjectId(userId),
       type: "income",
@@ -62,14 +58,13 @@ export async function calculateTotalIncome(
     };
 
     if (month) {
-      // Esta lógica já é robusta e lida bem com timezone, vamos mantê-la
       initialMatch.$expr = {
         $eq: [
           {
             $dateToString: {
               format: "%Y-%m",
               date: "$date",
-              timezone: TIMEZONE, // Use a sua constante de timezone
+              timezone: TIMEZONE, 
             },
           },
           month,
@@ -79,11 +74,10 @@ export async function calculateTotalIncome(
     pipeline.push({ $match: initialMatch });
 
     if (categoryName) {
-      // Este lookup está correto
       pipeline.push({
         $lookup: {
           from: "categories",
-          let: { category_id: "$categoryId" }, // Simplificado
+          let: { category_id: "$categoryId" }, 
           pipeline: [
             {
               $match: {
@@ -108,14 +102,12 @@ export async function calculateTotalIncome(
 }
 
 export async function calculateTotalExpenses(
-  userId, // Recebe o ObjectId
+  userId, 
   categoryName = null,
   month = null
 ) {
   try {
     const pipeline = [];
-
-    // GARANTE QUE O FILTRO É FEITO COM ObjectId
     const initialMatch = {
       userId: new mongoose.Types.ObjectId(userId),
       type: "expense",
@@ -123,14 +115,13 @@ export async function calculateTotalExpenses(
     };
 
     if (month) {
-      // USA A MESMA LÓGICA ROBUSTA DE INCOME PARA CONSISTÊNCIA E PRECISÃO DE TIMEZONE
       initialMatch.$expr = {
         $eq: [
           {
             $dateToString: {
               format: "%Y-%m",
               date: "$date",
-              timezone: TIMEZONE, // Use a sua constante de timezone
+              timezone: TIMEZONE,
             },
           },
           month,
@@ -141,11 +132,10 @@ export async function calculateTotalExpenses(
     pipeline.push({ $match: initialMatch });
 
     if (categoryName) {
-      // Este lookup está correto
       pipeline.push({
         $lookup: {
           from: "categories",
-          let: { category_id: "$categoryId" }, // Simplificado
+          let: { category_id: "$categoryId" },
           pipeline: [
             {
               $match: {
@@ -446,43 +436,47 @@ export async function getOrCreateCategory(userId, categoryName) {
 
 export async function getTotalReminders(userId) {
   const allFutureRemindersArray = await Reminder.find({
-    userId,
+    userId: new mongoose.Types.ObjectId(userId),
     date: { $gte: new Date() },
   }).sort({ date: "asc" });
 
   if (allFutureRemindersArray.length === 0) {
-    return "Você não tem nenhum lembrete futuro. ✨";
+    return "Você não tem nenhum lembrete futuro. ✨\n\nPara adicionar um, é só dizer o que e quando! Ex: 'Lembrar de comprar pão amanhã às 8h'.";
   }
 
-  const allFutureReminders = allFutureRemindersArray
+  const reminderBlocks = allFutureRemindersArray
     .map((r) => {
-      const formattedDate = formatInBrazil(r.date);
-      const messageCode = r.messageId ? `#_${r.messageId}_` : "";
-      return `🗓️ ${r.description.toUpperCase()} - *${formattedDate}* ${messageCode}`;
+      const formattedDateTime = formatInBrazilWithTime(r.date);
+      const messageCode = r.messageId ? `\`#${r.messageId}\`` : "";
+      return [
+        `📝 *${r.description.toUpperCase()}*`,
+        `⏰ *Quando:* ${formattedDateTime}`,
+        `🆔 *ID para apagar:* ${messageCode}`,
+      ].join("\n");
     })
-    .join("\n\n");
+    .join("\n\n- - - - - - - - - - - - - -\n\n");
 
-  return `🔔 *Seus próximos lembretes:*\n\n${allFutureReminders}`;
+  const header = "🔔 *Seus próximos lembretes:*\n\n";
+  const footer = `\n\nPara remover um item, envie: *apagar lembrete #ID*`;
+
+  return header + reminderBlocks + footer;
 }
 
 export async function getActiveInstallments(userId) {
   try {
     const activeInstallments = await Transaction.aggregate([
-      // 1. Filtrar transações de parcelamento do usuário que AINDA TÊM parcelas pendentes.
-      // Primeiro, encontramos todos os grupos que têm pelo menos uma parcela pendente.
       {
         $match: {
           userId: new mongoose.Types.ObjectId(userId),
           installmentsGroupId: { $ne: null },
-          status: "pending"
-        }
+          status: "pending",
+        },
       },
       {
         $group: {
-          _id: "$installmentsGroupId"
-        }
+          _id: "$installmentsGroupId",
+        },
       },
-      // Agora, usamos esses IDs de grupo para buscar TODAS as parcelas (pending e completed) desses grupos.
       {
         $lookup: {
           from: "transactions",
@@ -490,57 +484,52 @@ export async function getActiveInstallments(userId) {
           pipeline: [
             {
               $match: {
-                $expr: { $eq: ["$installmentsGroupId", "$$groupId"] }
-              }
+                $expr: { $eq: ["$installmentsGroupId", "$$groupId"] },
+              },
             },
             {
-              $sort: { installmentsCurrent: 1 }
-            }
+              $sort: { installmentsCurrent: 1 },
+            },
           ],
-          as: "installments"
-        }
+          as: "installments",
+        },
       },
       {
-        $unwind: "$installments"
+        $unwind: "$installments",
       },
-      // 2. Substitui a raiz do documento pelos dados das parcelas
       {
-        $replaceRoot: { newRoot: "$installments" }
+        $replaceRoot: { newRoot: "$installments" },
       },
-      // 3. Agora agrupamos como antes, mas com uma lógica de contagem diferente
       {
         $group: {
           _id: "$installmentsGroupId",
           description: { $first: "$description" },
           totalInstallments: { $first: "$installmentsCount" },
           installmentAmount: { $first: "$amount" },
-          // CONTA PENDENTES: Soma 1 para cada parcela com status "pending"
           pendingCount: {
             $sum: {
-              $cond: [{ $eq: ["$status", "pending"] }, 1, 0]
-            }
-          }
-        }
+              $cond: [{ $eq: ["$status", "pending"] }, 1, 0],
+            },
+          },
+        },
       },
-      // 4. Formatar a saída
       {
         $project: {
           _id: 0,
           groupId: "$_id",
           description: {
             $trim: {
-              input: { $arrayElemAt: [{ $split: ["$description", " - "] }, 0] }
-            }
+              input: { $arrayElemAt: [{ $split: ["$description", " - "] }, 0] },
+            },
           },
           totalInstallments: "$totalInstallments",
           installmentAmount: "$installmentAmount",
-          pendingCount: "$pendingCount"
-        }
+          pendingCount: "$pendingCount",
+        },
       },
-      // 5. Ordenar a lista final
       {
-        $sort: { description: 1 }
-      }
+        $sort: { description: 1 },
+      },
     ]);
 
     return activeInstallments;

@@ -6,6 +6,8 @@ import {
 } from "../services/twilioService.js";
 import { devLog } from "../helpers/logger.js";
 import User from "../models/User.js";
+import { fromZonedTime } from "date-fns-tz";
+import { TIMEZONE } from "../utils/dateUtils.js";
 
 import { interpretMessageWithAI } from "../services/aiService.js";
 import {
@@ -67,8 +69,8 @@ router.post("/", async (req, res) => {
       "🔒 Para utilizar o chatbot, você precisa adquirir o produto primeiro. Acesse: https://seusite.com/comprar"
     );
   } else {
-    const userObjectId = user._id; // O ObjectId puro para queries no DB
-    const userIdString = user._id.toString(); // A string, APENAS para chaves de objeto JS
+    const userObjectId = user._id;
+    const userIdString = user._id.toString();
     devLog(`User DB ID: ${userIdString}`);
 
     const previousData = conversationState[userIdString] || {};
@@ -126,7 +128,7 @@ router.post("/", async (req, res) => {
             }
 
             const transactionsToCreate = [];
-            const purchaseDate = new Date(); 
+            const purchaseDate = new Date();
             let startingMonthOffset = 0;
             if (purchaseDate.getDate() >= dueDay) {
               startingMonthOffset = 1;
@@ -134,7 +136,7 @@ router.post("/", async (req, res) => {
 
             for (let i = 0; i < installments; i++) {
               const paymentDate = new Date(purchaseDate);
-              paymentDate.setHours(0, 0, 0, 0); 
+              paymentDate.setHours(0, 0, 0, 0);
 
               paymentDate.setMonth(
                 purchaseDate.getMonth() + i + startingMonthOffset
@@ -754,26 +756,20 @@ router.post("/", async (req, res) => {
               const sendSequentially = async () => {
                 try {
                   for (const chunk of messageChunks) {
-                    await sendTextMessageTEST(req.body.From, chunk); // <-------------- TEST
+                    await sendTextMessage(req.body.From, chunk);
                     await new Promise((resolve) => setTimeout(resolve, 500));
                   }
                 } catch (error) {
                   devLog("Erro no loop de envio sequencial:", error);
                 }
               };
-
-              // Dispara o envio em background
               sendSequentially();
-
-              // Envia a resposta vazia imediatamente para o Twilio
               res.writeHead(200, { "Content-Type": "text/xml" });
               res.end(new twilio.twiml.MessagingResponse().toString());
-
-              // SINALIZA QUE A RESPOSTA FOI ENVIADA
               responseHasBeenSent = true;
 
               delete conversationState[userIdString];
-              break; // O break é suficiente aqui
+              break; 
             }
 
             case "get_active_installments": {
@@ -806,12 +802,31 @@ router.post("/", async (req, res) => {
 
             case "reminder": {
               const { description, date } = interpretation.data;
+              if (!date) {
+                twiml.message(
+                  "⏰ Por favor, forneça uma data e hora futuras válidas para o lembrete. Ex: 'Lembrar de ligar para o dentista amanhã às 14h'."
+                );
+                break;
+              }
+                         
+              const localDateString = date.slice(0, 19);
+              const dateToSave = fromZonedTime(localDateString, TIMEZONE);
+
+              if (!(dateToSave > new Date())) {
+                twiml.message(
+                  "⏰ Ops, essa data já passou! Por favor, forneça uma data e hora futuras."
+                );
+                break;
+              }
+
               const newReminder = new Reminder({
                 userId: userObjectId,
+                userPhoneNumber: userPhoneNumber,
                 description: description,
-                date: date,
+                date: dateToSave,
                 messageId: generateId(),
               });
+
               await newReminder.save();
               await sendReminderMessage(twiml, userMessage, newReminder);
               break;

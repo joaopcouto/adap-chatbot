@@ -1,5 +1,7 @@
-export function formatPhoneNumber(userId) {
-    let formatted = userId.replace(/\s+/g, "").trim();
+export function formatPhoneNumber(phoneNumber) {
+    if (!phoneNumber) return null; 
+
+    let formatted = phoneNumber.replace(/\s+/g, "").trim();
     if (!formatted.startsWith("whatsapp:")) {
       formatted = `whatsapp:${formatted}`;
     }
