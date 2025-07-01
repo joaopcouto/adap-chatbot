@@ -1,8 +1,11 @@
 import cron from "node-cron";
 import Reminder from "../models/Reminder.js";
-import { sendTextMessage } from "../services/twilioService.js";
+import {
+  sendTextMessage,
+  sendTemplateMessage,
+} from "../services/twilioService.js";
 import { devLog } from "../helpers/logger.js";
-import { formatPhoneNumber } from '../utils/formatPhone.js';
+import { formatPhoneNumber } from "../utils/formatPhone.js";
 
 async function checkAndSendReminders() {
   const now = new Date();
@@ -26,7 +29,8 @@ async function checkAndSendReminders() {
     );
 
     for (const reminder of dueReminders) {
-      const message = `🔔 *Lembrete da ADAP:*\n\n${reminder.description}`;
+      // A mensagem agora não é mais usada diretamente.
+      // const message = `🔔 *Lembrete da ADAP:*\n\n${reminder.description}`;
 
       try {
         const recipient = formatPhoneNumber(reminder.userPhoneNumber);
@@ -38,10 +42,25 @@ async function checkAndSendReminders() {
           continue;
         }
 
-        await sendTextMessage(recipient, message);
+        // ASSUMA QUE SEU TEMPLATE FOI CRIADO E O SID ESTÁ NO .ENV
+        const templateSid = process.env.TWILIO_REMINDER_TEMPLATE_SID;
+        if (!templateSid) {
+          devLog(
+            "[ReminderJob] ERRO CRÍTICO: TWILIO_REMINDER_TEMPLATE_SID não definido no .env"
+          );
+          continue;
+        }
+
+        // Defina as variáveis para o template
+        const templateVariables = {
+          1: reminder.description, // Mapeia para o placeholder {{1}}
+        };
+
+        // CHAMA A NOVA FUNÇÃO
+        await sendTemplateMessage(recipient, templateSid, templateVariables);
 
         devLog(
-          `[ReminderJob] Lembrete #${reminder.messageId} enviado para ${recipient}.`
+          `[ReminderJob] Lembrete #${reminder.messageId} enviado via template para ${recipient}.`
         );
 
         await Reminder.findByIdAndDelete(reminder._id);

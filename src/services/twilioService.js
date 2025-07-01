@@ -75,3 +75,21 @@ export async function sendProactiveMessage(to, body) {
     throw error;
   }
 }
+
+export async function sendTemplateMessage(recipient, templateSid, variables) {
+  try {
+    devLog(`Enviando template ${templateSid} para ${recipient} com variáveis:`, variables);
+    
+    await twilioClient.messages.create({
+      from: process.env.TWILIO_PHONE_NUMBER,
+      to: recipient,
+      contentSid: templateSid,
+      contentVariables: JSON.stringify(variables),
+    });
+
+    devLog(`Template ${templateSid} enviado com sucesso para ${recipient}.`);
+  } catch (error) {
+    devLog("Erro ao enviar mensagem de template via serviço:", error);
+    throw error; // Propaga o erro para quem chamou a função
+  }
+}

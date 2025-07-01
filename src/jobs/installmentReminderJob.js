@@ -1,8 +1,7 @@
 import cron from "node-cron";
-import mongoose from "mongoose";
 import Transaction from "../models/Transaction.js";
 import { devLog } from "../helpers/logger.js";
-import { sendProactiveMessage } from "../services/twilioService.js";
+import { sendTemplateMessage } from "../services/twilioService.js";
 import { formatInstallmentReminderMessage } from "../helpers/messages.js";
 
 const processInstallmentReminders = async () => {
@@ -37,6 +36,15 @@ const processInstallmentReminders = async () => {
       `[CRON JOB] Encontradas ${upcomingInstallments.length} parcelas para lembrar.`
     );
 
+    // Pega o SID do template do .env
+    const templateSid = process.env.TWILIO_INSTALLMENT_TEMPLATE_SID;
+    if (!templateSid) {
+      devLog(
+        "[CRON JOB] ERRO CRÍTICO: TWILIO_INSTALLMENT_TEMPLATE_SID não definido no .env"
+      );
+      return; // Sai da função se o SID não estiver configurado
+    }
+
     for (const transaction of upcomingInstallments) {
       if (
         transaction.userId &&
@@ -44,13 +52,23 @@ const processInstallmentReminders = async () => {
         transaction.userId.phoneNumber
       ) {
         try {
-          const reminderMessage = formatInstallmentReminderMessage(transaction);
-          await sendProactiveMessage(
-            transaction.userId.phoneNumber,
-            reminderMessage
-          );
+          // Formata o número do destinatário
+          const recipient = formatPhoneNumber(transaction.userId.phoneNumber);
+
+          // Cria o objeto de variáveis para o template
+          const templateVariables = {
+            1: transaction.userId.name || "usuário", // Nome do usuário
+            2: transaction.description, // Descrição da parcela
+            3: transaction.amount.toFixed(2).replace(".", ","), // Valor formatado
+          };
+
+          // --- MUDA A CHAMADA DA FUNÇÃO ---
+          // ANTES: await sendProactiveMessage(transaction.userId.phoneNumber, reminderMessage);
+          // AGORA:
+          await sendTemplateMessage(recipient, templateSid, templateVariables);
+
           devLog(
-            `Lembrete enviado com sucesso para ${transaction.userId.phoneNumber} sobre "${transaction.description}"`
+            `Lembrete de parcela enviado com sucesso para ${recipient} sobre "${transaction.description}"`
           );
           await Transaction.updateOne(
             { _id: transaction._id },
@@ -61,7 +79,7 @@ const processInstallmentReminders = async () => {
           );
         } catch (sendError) {
           devLog(
-            `[CRON JOB] Falha ao ENVIAR lembrete para ${transaction.userId.phoneNumber}. Erro:`,
+            `[CRON JOB] Falha ao ENVIAR lembrete de parcela para ${transaction.userId.phoneNumber}. Erro:`,
             sendError
           );
         }
