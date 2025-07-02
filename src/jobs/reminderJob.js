@@ -1,7 +1,7 @@
 import cron from "node-cron";
 import Reminder from "../models/Reminder.js";
 import {
-  sendTextMessage,
+  sendTemplateMessageTEST,
   sendTemplateMessage,
 } from "../services/twilioService.js";
 import { devLog } from "../helpers/logger.js";
@@ -29,9 +29,6 @@ async function checkAndSendReminders() {
     );
 
     for (const reminder of dueReminders) {
-      // A mensagem agora não é mais usada diretamente.
-      // const message = `🔔 *Lembrete da ADAP:*\n\n${reminder.description}`;
-
       try {
         const recipient = formatPhoneNumber(reminder.userPhoneNumber);
 
@@ -42,7 +39,6 @@ async function checkAndSendReminders() {
           continue;
         }
 
-        // ASSUMA QUE SEU TEMPLATE FOI CRIADO E O SID ESTÁ NO .ENV
         const templateSid = process.env.TWILIO_REMINDER_TEMPLATE_SID;
         if (!templateSid) {
           devLog(
@@ -51,13 +47,19 @@ async function checkAndSendReminders() {
           continue;
         }
 
-        // Defina as variáveis para o template
         const templateVariables = {
-          1: reminder.description, // Mapeia para o placeholder {{1}}
+          1: reminder.description,
         };
 
-        // CHAMA A NOVA FUNÇÃO
-        await sendTemplateMessage(recipient, templateSid, templateVariables);
+        if (process.env.NODE_ENV === "test") {
+          // Estamos em modo de desenvolvimento/teste
+          devLog("[ReminderJob] MODO TESTE: Simulando envio de template.");
+          await sendTemplateMessageTEST(recipient, templateSid, templateVariables);
+        } else {
+          // Estamos em modo de produção
+          devLog("[ReminderJob] MODO PRODUÇÃO: Enviando template real.");
+          await sendTemplateMessage(recipient, templateSid, templateVariables);
+        }
 
         devLog(
           `[ReminderJob] Lembrete #${reminder.messageId} enviado via template para ${recipient}.`

@@ -161,11 +161,3 @@ export async function sendFinancialHelpMessage(twiml, message) {
 
   twiml.message(response.choices[0].message.content);
 }
-
-export function formatInstallmentReminderMessage(transaction) {
-  const amount = transaction.amount.toFixed(2).replace('.', ',');
-  const description = transaction.description; // ex: "PS5 - 2/10"
-  
-  return `🔔 *Lembrete de Parcela* 🔔\n\n` +
-         `Olá! Só passando para lembrar que a sua parcela de *${description}* no valor de *R$ ${amount}* vence hoje!`;
-}

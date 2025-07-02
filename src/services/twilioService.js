@@ -1,6 +1,5 @@
 import twilio from "twilio";
 import { formatPhoneNumber } from "../utils/formatPhone.js";
-import { fixPhoneNumber } from "../utils/phoneUtils.js";
 
 const client = twilio(
   process.env.TWILIO_ACCOUNT_SID,
@@ -48,34 +47,6 @@ export async function sendTextMessageTEST(to, body) {
   return new Promise((resolve) => setTimeout(resolve, 100));
 }
 
-export async function sendProactiveMessage(to, body) {
-  try {
-    // 1. Limpa e formata o número base (garante que temos só os dígitos)
-    let baseNumber = to.replace(/\D/g, ""); // Remove tudo que não for dígito
-
-    // Garante que o número começa com 55 se for um número brasileiro
-    if (baseNumber.length === 11 && !baseNumber.startsWith("55")) {
-      baseNumber = "55" + baseNumber;
-    }
-
-    // 2. Monta o número final no formato E.164 para WhatsApp
-    const e164Number = `whatsapp:+${baseNumber}`;
-
-    await client.messages.create({
-      from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
-      to: e164Number, // Usa o número formatado aqui
-      body: body,
-    });
-
-    // Use devLog aqui se tiver importado
-    console.log(`Mensagem proativa enviada para ${e164Number}`);
-  } catch (error) {
-    console.error(`Erro ao enviar mensagem proativa para ${to}:`, error);
-    // Propague o erro para que o chamador saiba que falhou
-    throw error;
-  }
-}
-
 export async function sendTemplateMessage(recipient, templateSid, variables) {
   try {
     devLog(`Enviando template ${templateSid} para ${recipient} com variáveis:`, variables);
@@ -92,4 +63,19 @@ export async function sendTemplateMessage(recipient, templateSid, variables) {
     devLog("Erro ao enviar mensagem de template via serviço:", error);
     throw error; // Propaga o erro para quem chamou a função
   }
+}
+
+//função para o ambiente de testes
+export async function sendTemplateMessageTEST(recipient, templateSid, variables) {
+  console.log("\n=================================================");
+  console.log("======= 🚀 SIMULAÇÃO DE ENVIO DE TEMPLATE 🚀 =======");
+  console.log("=================================================");
+  console.log(`|-> 📲 Destinatário: ${recipient}`);
+  console.log(`|-> 📄 Template SID: ${templateSid}`);
+  console.log(`|-> 📦 Variáveis:`);
+  console.log(JSON.stringify(variables, null, 2)); // Imprime o objeto de variáveis de forma bonita
+  console.log("=================================================\n");
+
+  // Retorna uma promessa resolvida para manter a consistência com a função real
+  return Promise.resolve();
 }

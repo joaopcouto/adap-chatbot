@@ -2,7 +2,6 @@ import cron from "node-cron";
 import Transaction from "../models/Transaction.js";
 import { devLog } from "../helpers/logger.js";
 import { sendTemplateMessage } from "../services/twilioService.js";
-import { formatInstallmentReminderMessage } from "../helpers/messages.js";
 
 const processInstallmentReminders = async () => {
   const today = new Date();
@@ -36,13 +35,12 @@ const processInstallmentReminders = async () => {
       `[CRON JOB] Encontradas ${upcomingInstallments.length} parcelas para lembrar.`
     );
 
-    // Pega o SID do template do .env
     const templateSid = process.env.TWILIO_INSTALLMENT_TEMPLATE_SID;
     if (!templateSid) {
       devLog(
         "[CRON JOB] ERRO CRÍTICO: TWILIO_INSTALLMENT_TEMPLATE_SID não definido no .env"
       );
-      return; // Sai da função se o SID não estiver configurado
+      return; 
     }
 
     for (const transaction of upcomingInstallments) {
@@ -52,19 +50,13 @@ const processInstallmentReminders = async () => {
         transaction.userId.phoneNumber
       ) {
         try {
-          // Formata o número do destinatário
           const recipient = formatPhoneNumber(transaction.userId.phoneNumber);
-
-          // Cria o objeto de variáveis para o template
           const templateVariables = {
-            1: transaction.userId.name || "usuário", // Nome do usuário
-            2: transaction.description, // Descrição da parcela
-            3: transaction.amount.toFixed(2).replace(".", ","), // Valor formatado
+            1: transaction.userId.name || "usuário", 
+            2: transaction.description, 
+            3: transaction.amount.toFixed(2).replace(".", ","),
           };
 
-          // --- MUDA A CHAMADA DA FUNÇÃO ---
-          // ANTES: await sendProactiveMessage(transaction.userId.phoneNumber, reminderMessage);
-          // AGORA:
           await sendTemplateMessage(recipient, templateSid, templateVariables);
 
           devLog(
