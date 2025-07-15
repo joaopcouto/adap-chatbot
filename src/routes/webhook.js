@@ -267,7 +267,7 @@ router.post("/", async (req, res) => {
             );
           } else {
             twiml.message(
-              `A categoria "${finalCategory}" não existe e você não pode criar novas no plano gratuito.\n\n` +
+              `A categoria "${finalCategory}" não existe e você não pode criar novas no plano básico.\n\n` +
                 `Seu gasto com "${description}" foi adicionado na categoria "Outro".`
             );
             finalCategory = "outro";
