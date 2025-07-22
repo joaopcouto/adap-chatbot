@@ -65,7 +65,7 @@ router.post("/", async (req, res) => {
 
   if (!authorized) {
     twiml.message(
-      "🔒 Para utilizar o chatbot, você precisa adquirir o produto primeiro. Acesse: https://seusite.com/comprar"
+      "🔒 Para utilizar o chatbot, você precisa adquirir o produto primeiro. Acesse: https://www.adapfinanceira.com.br/"
     );
     res.writeHead(200, { "Content-Type": "text/xml" });
     return res.end(twiml.toString());
