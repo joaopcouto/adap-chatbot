@@ -6,7 +6,7 @@ export async function validateUserAccess(userId) {
     
     if (!user) return { authorized: false };
 
-    const hasPermission = await Permissions.findOne({ userId: user._id, access: true, productId: "ADAP" });
+    const hasPermission = await Permissions.findOne({ userId: user._id, access: true, productId: "chatbot" });
 
     if (!hasPermission) return { authorized: false };
 
