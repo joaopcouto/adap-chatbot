@@ -155,7 +155,7 @@ router.post("/", async (req, res) => {
                 installmentsCurrent: i + 1,
                 installmentsGroupId: installmentsGroupId,
                 categoryId: categoryDoc._id,
-                paymentMethodId: creditPaymentMethod._id,
+                paymentMethodId: creditPaymentMethod._id.toString(),
               });
             }
 
@@ -281,7 +281,7 @@ router.post("/", async (req, res) => {
                 type: "income",
                 date: new Date(),
                 messageId: generateId(),
-                paymentMethodId: defaultPaymentMethod._id,
+                paymentMethodId: defaultPaymentMethod._id.toString(),
                 status: "completed",
               });
 
@@ -333,7 +333,7 @@ router.post("/", async (req, res) => {
                 type: "expense",
                 date: new Date(),
                 messageId: generateId(),
-                paymentMethodId: defaultPaymentMethod._id,
+                paymentMethodId: defaultPaymentMethod._id.toString(),
                 status: "completed",
               });
 
@@ -421,7 +421,7 @@ router.post("/", async (req, res) => {
                 type: newType,
                 date: new Date(),
                 messageId: generateId(),
-                paymentMethodId: defaultPaymentMethod._id,
+                paymentMethodId: defaultPaymentMethod._id.toString(),
                 status: "completed",
               });
 
