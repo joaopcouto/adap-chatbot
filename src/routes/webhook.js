@@ -821,7 +821,7 @@ router.post("/", async (req, res) => {
 
               const newReminder = new Reminder({
                 userId: userObjectId,
-                userPhoneNumber: userPhoneNumber,
+                userPhoneNumber: req.body.From.replace('whatsapp:', ''),
                 description: description,
                 date: dateToSave,
                 messageId: generateId(),

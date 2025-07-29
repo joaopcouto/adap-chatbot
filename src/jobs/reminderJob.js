@@ -1,11 +1,11 @@
 import cron from "node-cron";
 import Reminder from "../models/Reminder.js";
-import {
-  sendTemplateMessageTEST,
-  sendTemplateMessage,
-} from "../services/twilioService.js";
+import { sendTemplateMessage } from "../services/twilioService.js";
 import { devLog } from "../helpers/logger.js";
 import { formatPhoneNumber } from "../utils/formatPhone.js";
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 async function checkAndSendReminders() {
   const now = new Date();
@@ -40,27 +40,14 @@ async function checkAndSendReminders() {
         }
 
         const templateSid = process.env.TWILIO_REMINDER_TEMPLATE_SID;
-        if (!templateSid) {
-          devLog(
-            "[ReminderJob] ERRO CRÍTICO: TWILIO_REMINDER_TEMPLATE_SID não definido no .env"
-          );
-          continue;
-        }
 
         const templateVariables = {
           1: reminder.description,
         };
 
-        if (process.env.NODE_ENV === "test") {
-          // Estamos em modo de desenvolvimento/teste
-          devLog("[ReminderJob] MODO TESTE: Simulando envio de template.");
-          await sendTemplateMessageTEST(recipient, templateSid, templateVariables);
-        } else {
-          // Estamos em modo de produção
-          devLog("[ReminderJob] MODO PRODUÇÃO: Enviando template real.");
-          await sendTemplateMessage(recipient, templateSid, templateVariables);
-        }
-
+        devLog("[ReminderJob] MODO PRODUÇÃO: Enviando template real.");
+        await sendTemplateMessage(recipient, templateSid, templateVariables);
+        
         devLog(
           `[ReminderJob] Lembrete #${reminder.messageId} enviado via template para ${recipient}.`
         );

@@ -1,5 +1,3 @@
-// src/services/aiService.js
-
 import { OpenAI } from "openai";
 
 const openai = new OpenAI({
@@ -8,16 +6,11 @@ const openai = new OpenAI({
 
 export async function interpretMessageWithAI(message, currentDate) {
   const now = new Date(currentDate);
-
   const currentYear = now.getFullYear();
   const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
   const currentDay = String(now.getDate()).padStart(2, '0');
-  
-  // Nomes em português para clareza total no prompt
   const monthName = now.toLocaleString('pt-BR', { month: 'long' });
   const dayOfWeekName = now.toLocaleString('pt-BR', { weekday: 'long' });
-
-  // Calcular "amanhã" para os exemplos
   const tomorrow = new Date(now);
   tomorrow.setDate(now.getDate() + 1);
   const tomorrowISO = tomorrow.toISOString().split('T')[0] + "T00:00:00.000Z";
@@ -189,7 +182,6 @@ export async function interpretMessageWithAI(message, currentDate) {
   });
 
   try {
-    // Adicionei uma limpeza para remover markdown que a IA às vezes adiciona
     const cleanResponse = response.choices[0].message.content.replace(/```json\n|```/g, '').trim();
     return JSON.parse(cleanResponse);
   } catch (err) {
