@@ -16,11 +16,10 @@ if (!client) {
 
 export async function sendReportImage(userId, imageUrl) {
   const formattedNumber = formatPhoneNumber(userId);
-
   try {
     const message = await client.messages.create({
       from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
-      to: formattedNumber,
+      to: userId,
       mediaUrl: [imageUrl],
       body: "📊 Relatório de gastos",
     });

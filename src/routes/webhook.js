@@ -20,7 +20,6 @@ import {
   getIncomeDetails,
   getOrCreateCategory,
   getActiveInstallments,
-  getOrCreatePaymentMethod,
 } from "../helpers/totalUtils.js";
 import {
   generateChart,
@@ -145,7 +144,7 @@ router.post("/", async (req, res) => {
               paymentDate.setDate(dueDay);
 
               transactionsToCreate.push({
-                userId: user._id,
+                userId: userIdString,
                 amount: installmentAmount,
                 description: `${description} - ${i + 1}/${installments}`,
                 date: paymentDate,
@@ -262,7 +261,7 @@ router.post("/", async (req, res) => {
               }
 
               const categoryDoc = await getOrCreateCategory(
-                userObjectId,
+                userIdString,
                 finalCategoryName
               );
 
@@ -275,7 +274,7 @@ router.post("/", async (req, res) => {
                 );
               }
               const newIncome = new Transaction({
-                userId: userObjectId,
+                userId: userIdString,
                 amount,
                 description,
                 categoryId: categoryDoc._id.toString(),
@@ -313,7 +312,7 @@ router.post("/", async (req, res) => {
               }
 
               const categoryDoc = await getOrCreateCategory(
-                userObjectId,
+                userIdString,
                 finalCategoryName
               );
 
@@ -327,7 +326,7 @@ router.post("/", async (req, res) => {
               }
 
               const newExpense = new Transaction({
-                userId: userObjectId,
+                userId: userIdString,
                 amount,
                 description,
                 categoryId: categoryDoc._id.toString(),
@@ -401,7 +400,7 @@ router.post("/", async (req, res) => {
               }
 
               const categoryDoc = await getOrCreateCategory(
-                userObjectId,
+                userIdString,
                 newCategory
               );
 
@@ -415,7 +414,7 @@ router.post("/", async (req, res) => {
               }
 
               const newTransaction = new Transaction({
-                userId: userObjectId,
+                userId: userIdString,
                 amount: newAmount,
                 description: newDescription,
                 categoryId: categoryDoc._id.toString(),
@@ -454,8 +453,36 @@ router.post("/", async (req, res) => {
               break;
             }
 
+            case "get_active_installments": {
+              const installments = await getActiveInstallments(userIdString);
+
+              if (installments.length === 0) {
+                twiml.message(
+                  "Você não possui compras parceladas ativas no momento. ✨"
+                );
+                break;
+              }
+
+              let responseMessage = "🛍️ *Suas compras parceladas ativas:*\n\n";
+
+              installments.forEach((item) => {
+                responseMessage +=
+                  `*Item:* ${item.description}\n` +
+                  `*Valor:* ${
+                    item.totalInstallments
+                  }x de R$ ${item.installmentAmount.toFixed(2)}\n` +
+                  `*Restam:* ${item.pendingCount} parcelas\n` +
+                  `*ID para excluir:* \`#${item.groupId}\`\n\n`;
+              });
+
+              responseMessage += `Para cancelar uma compra, envie "excluir parcelamento #ID".`;
+
+              twiml.message(responseMessage);
+              break;
+            }
+
             case "delete_installment_group": {
-              const { installmentsGroupId } = interpretation.data;
+              let { installmentsGroupId } = interpretation.data;
               if (!installmentsGroupId) {
                 twiml.message(
                   "Por favor, informe o ID do parcelamento que deseja excluir (ex: excluir parcelamento #ID)."
@@ -463,9 +490,11 @@ router.post("/", async (req, res) => {
                 break;
               }
 
+              installmentsGroupId = installmentsGroupId.trim();
+
               try {
                 const transactions = await Transaction.find({
-                  userId: userObjectId,
+                  userId: userIdString,
                   installmentsGroupId: installmentsGroupId,
                 });
 
@@ -479,7 +508,7 @@ router.post("/", async (req, res) => {
                 const description = transactions[0].description.split(" - ")[0];
 
                 const deleteResult = await Transaction.deleteMany({
-                  userId: userObjectId,
+                  userId: userIdString,
                   installmentsGroupId: installmentsGroupId,
                 });
 
@@ -583,7 +612,7 @@ router.post("/", async (req, res) => {
               } else {
                 const imageUrl = await generateChart(
                   reportData,
-                  userObjectId,
+                  userObjectId.toString(),
                   daysToRequest
                 );
                 twiml.message().media(imageUrl);
@@ -604,7 +633,7 @@ router.post("/", async (req, res) => {
               } else {
                 const imageUrl = await generateCategoryChart(
                   categoryReport,
-                  userObjectId
+                  userObjectId.toString()
                 );
                 twiml.message().media(imageUrl);
               }
@@ -630,7 +659,7 @@ router.post("/", async (req, res) => {
               }
 
               const total = await calculateTotalExpenses(
-                user._id,
+                userIdString,
                 category,
                 month
               );
@@ -691,7 +720,7 @@ router.post("/", async (req, res) => {
               }
 
               const totalIncome = await calculateTotalIncome(
-                user._id,
+                userIdString,
                 month,
                 category
               );
@@ -721,7 +750,7 @@ router.post("/", async (req, res) => {
                 }
 
                 responseMessage += `.\n\nDigite "detalhes" para ver a lista de itens.`;
-                conversationState[userObjectId] = {
+                conversationState[userIdString] = {
                   type: "income",
                   category,
                   month,
@@ -740,14 +769,14 @@ router.post("/", async (req, res) => {
               let messageChunks = [];
               if (type === "income") {
                 messageChunks = await getIncomeDetails(
-                  user._id,
+                  userIdString,
                   month,
                   monthName,
                   category
                 );
               } else {
                 messageChunks = await getExpenseDetails(
-                  user._id,
+                  userIdString,
                   month,
                   monthName,
                   category
@@ -771,34 +800,6 @@ router.post("/", async (req, res) => {
 
               delete conversationState[userIdString];
               break; 
-            }
-
-            case "get_active_installments": {
-              const installments = await getActiveInstallments(user._id);
-
-              if (installments.length === 0) {
-                twiml.message(
-                  "Você não possui compras parceladas ativas no momento. ✨"
-                );
-                break;
-              }
-
-              let responseMessage = "🛍️ *Suas compras parceladas ativas:*\n\n";
-
-              installments.forEach((item) => {
-                responseMessage +=
-                  `*Item:* ${item.description}\n` +
-                  `*Valor:* ${
-                    item.totalInstallments
-                  }x de R$ ${item.installmentAmount.toFixed(2)}\n` +
-                  `*Restam:* ${item.pendingCount} parcelas\n` +
-                  `*ID para excluir:* \`#${item.groupId}\`\n\n`;
-              });
-
-              responseMessage += `Para cancelar uma compra, envie "excluir parcelamento #ID".`;
-
-              twiml.message(responseMessage);
-              break;
             }
 
             case "reminder": {

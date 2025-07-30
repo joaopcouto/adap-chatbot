@@ -6,77 +6,39 @@ const openai = new OpenAI({
 });
 
 export function sendGreetingMessage(twiml) {
-  twiml.message(`👋 Oi, eu sou a ADAP – sua Assistente Direta ao Ponto.
+  twiml.message(`👋 Olá! Sou a ADAP, sua Assistente Financeira Pessoal. Organize suas finanças de forma simples e direta, aqui mesmo no WhatsApp.
 
-Fui criada para te ajudar a organizar suas finanças de forma simples, direto por aqui no WhatsApp, sem complicação. 📊💸
+Aqui estão alguns exemplos para começar:
 
-Comigo, você consegue:
+Lançamentos Diários 📝
+› "25 mercado"
+› "150 uber em transporte"
+› "recebi 2000 salário"
 
-1️⃣ Anotar seus gastos e receitas em segundos
-2️⃣ Anotar seus lembretes e compromissos de forma simples
-3️⃣ Acompanhar seus gastos por categoria (Lazer, Gastos fixos, etc.)
-4️⃣ Acompanhar seu gasto ou receita total
-5️⃣ Simples de remover um gasto caso anote errado
-6️⃣ Gerar gráfico de gastos dos últimos 7 dias
-7️⃣ Gerar gráfico de gastos por categoria
-8️⃣ Gerar relatórios de gastos e receitas, filtrando ou não por categoria
-9️⃣ Dicas financeiras para o seu dia a dia
+Compras Parceladas 💳
+› "3500 PS5 em 10x"
+› "parcelamentos ativos"
 
-E tudo isso de forma automática. É só me mandar mensagens simples como:
+Relatórios e Gráficos 📊
+› "gasto total"
+› "receita total em junho"
+› "onde gastei nos últimos 30 dias"
+› "quais meus gastos nos últimos 7 dias"
 
-1️⃣ "25 mercado" ou "recebi 2000 salário"
-2️⃣ "Tenho reunião dia 15/06"
-3️⃣ "gasto total lazer"
-4️⃣ "gasto total" ou "receita total"
-5️⃣ "remover #(código do gasto/receita)"
-6️⃣ "quanto gastei nos últimos 7 dias"
-7️⃣ "onde foram meus gastos nos últimos 30 dias?"
-8️⃣ "qual meu gasto total em lazer?" ou "qual minha receita total em junho?"
-9️⃣ "onde posso deixar meu dinheiro para render mais?"
+Lembretes ⏰
+› "me lembre de pagar o aluguel dia 5"
+› "quais são meus lembretes"
 
+Para apagar algo, use o ID fornecido no registro. Por exemplo:
+› "remover gasto #a4b8c"
+› "excluir parcelamento #J-9tpH"
+› "apagar lembrete #d9bdd3"
 
-🔐 Seus dados são 100% seguros e privados.
-
-Ah, e aproveita pra nos seguir no Instagram também: @adapfinanceira
-
-Lá tem dicas diárias pra você gastar melhor e fazer seu dinheiro render mais! 🚀`);
+Estou aqui para simplificar seu controle financeiro. Vamos começar?`);
 }
 
 export function sendHelpMessage(twiml) {
-  twiml.message(`👋 Oi, eu sou a ADAP – sua Assistente Direta ao Ponto.
-
-Fui criada para te ajudar a organizar suas finanças de forma simples, direto por aqui no WhatsApp, sem complicação. 📊💸
-
-Comigo, você consegue:
-
-1️⃣ Anotar seus gastos e receitas em segundos
-2️⃣ Anotar seus lembretes e compromissos de forma simples
-3️⃣ Acompanhar seus gastos por categoria (Lazer, Gastos fixos, etc.)
-4️⃣ Acompanhar seu gasto ou receita total
-5️⃣ Simples de remover um gasto caso anote errado
-6️⃣ Gerar gráfico de gastos dos últimos 7 dias
-7️⃣ Gerar gráfico de gastos por categoria
-8️⃣ Gerar relatórios de gastos e receitas, filtrando ou não por categoria
-9️⃣ Dicas financeiras para o seu dia a dia
-
-E tudo isso de forma automática. É só me mandar mensagens simples como:
-
-1️⃣ "25 mercado" ou "recebi 2000 salário"
-2️⃣ "Tenho reunião dia 15/06"
-3️⃣ "gasto total lazer"
-4️⃣ "gasto total" ou "receita total"
-5️⃣ "remover #(código do gasto/receita)"
-6️⃣ "quanto gastei nos últimos 7 dias"
-7️⃣ "onde foram meus gastos nos últimos 30 dias?"
-8️⃣ "qual meu gasto total em lazer?" ou "qual minha receita total em junho?"
-9️⃣ "onde posso deixar meu dinheiro para render mais?"
-
-
-🔐 Seus dados são 100% seguros e privados.
-
-Ah, e aproveita pra nos seguir no Instagram também: @adapfinanceira
-
-Lá tem dicas diárias pra você gastar melhor e fazer seu dinheiro render mais! 🚀`);
+  sendGreetingMessage(twiml);
 }
 
 export function sendIncomeAddedMessage(twiml, incomeData) {

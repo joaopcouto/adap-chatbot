@@ -1,15 +1,13 @@
 import Transaction from "../models/Transaction.js";
 import Category from "../models/Category.js";
-import PaymentMethods from "../models/paymentmethods.js";
 import Reminder from "../models/Reminder.js";
 import {
   TIMEZONE,
-  formatInBrazil,
   formatInBrazilWithTime,
 } from "../utils/dateUtils.js";
 import mongoose from "mongoose";
 
-const MESSAGE_LIMIT = 1550; 
+const MESSAGE_LIMIT = 1550;
 
 function chunkLinesIntoMessages(lines) {
   if (!lines || lines.length === 0) {
@@ -17,7 +15,7 @@ function chunkLinesIntoMessages(lines) {
   }
 
   const chunks = [];
-  const header = lines.shift(); 
+  const header = lines.shift();
   let currentMessageBody = "";
 
   for (const line of lines) {
@@ -46,14 +44,14 @@ function chunkLinesIntoMessages(lines) {
 }
 
 export async function calculateTotalIncome(
-  userId, 
+  userId,
   month = null,
   categoryName = null
 ) {
   try {
     const pipeline = [];
     let initialMatch = {
-      userId: new mongoose.Types.ObjectId(userId),
+      userId: userId,
       type: "income",
       status: { $in: ["completed", "pending"] },
     };
@@ -65,7 +63,7 @@ export async function calculateTotalIncome(
             $dateToString: {
               format: "%Y-%m",
               date: "$date",
-              timezone: TIMEZONE, 
+              timezone: TIMEZONE,
             },
           },
           month,
@@ -78,7 +76,7 @@ export async function calculateTotalIncome(
       pipeline.push({
         $lookup: {
           from: "categories",
-          let: { category_id: "$categoryId" }, 
+          let: { category_id: "$categoryId" },
           pipeline: [
             {
               $match: {
@@ -103,56 +101,39 @@ export async function calculateTotalIncome(
 }
 
 export async function calculateTotalExpenses(
-  userId, 
+  userId,
   categoryName = null,
   month = null
 ) {
   try {
-    const pipeline = [];
-    const initialMatch = {
-      userId: new mongoose.Types.ObjectId(userId),
+    const matchQuery = {
+      userId: userId,
       type: "expense",
       status: { $in: ["completed", "pending"] },
     };
 
-    if (month) {
-      initialMatch.$expr = {
-        $eq: [
-          {
-            $dateToString: {
-              format: "%Y-%m",
-              date: "$date",
-              timezone: TIMEZONE,
-            },
-          },
-          month,
-        ],
-      };
-    }
-
-    pipeline.push({ $match: initialMatch });
-
     if (categoryName) {
-      pipeline.push({
-        $lookup: {
-          from: "categories",
-          let: { category_id: "$categoryId" },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ["$_id", "$$category_id"] },
-                name: { $regex: new RegExp(`^${categoryName.trim()}$`, "i") },
-              },
-            },
-          ],
-          as: "categoryDoc",
-        },
+      const category = await Category.findOne({
+        userId: userId,
+        name: { $regex: new RegExp(`^${categoryName.trim()}$`, "i") },
       });
-      pipeline.push({ $match: { categoryDoc: { $ne: [] } } });
+      if (!category) return 0;
+      matchQuery.categoryId = category._id.toString();
     }
 
-    pipeline.push({ $group: { _id: null, total: { $sum: "$amount" } } });
-    const result = await Transaction.aggregate(pipeline);
+    if (month) {
+      const year = parseInt(month.split("-")[0]);
+      const monthNumber = parseInt(month.split("-")[1]);
+      const startDate = new Date(Date.UTC(year, monthNumber - 1, 1, 0, 0, 0));
+      const endDate = new Date(Date.UTC(year, monthNumber, 1, 0, 0, 0));
+      endDate.setMilliseconds(endDate.getMilliseconds() - 1);
+
+      matchQuery.date = { $gte: startDate, $lte: endDate };
+    }
+    const result = await Transaction.aggregate([
+      { $match: matchQuery },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]);
 
     return result.length > 0 ? result[0].total : 0;
   } catch (err) {
@@ -167,8 +148,12 @@ export async function getExpensesReport(userId, days) {
 
   return Transaction.aggregate([
     {
-      $match: { userId, type: "expense", date: { $gte: startDate } },
-      status: { $in: ["completed", "pending"] },
+      $match: {
+        userId,
+        type: "expense",
+        date: { $gte: startDate },
+        status: { $in: ["completed", "pending"] },
+      },
     },
     {
       $group: {
@@ -193,8 +178,12 @@ export async function getCategoryReport(userId, days) {
 
   return Transaction.aggregate([
     {
-      $match: { userId, type: "expense", date: { $gte: startDate } },
-      status: { $in: ["completed", "pending"] },
+      $match: {
+        userId,
+        type: "expense",
+        date: { $gte: startDate },
+        status: { $in: ["completed", "pending"] },
+      },
     },
     {
       $lookup: {
@@ -227,57 +216,48 @@ export async function getExpenseDetails(
   categoryName
 ) {
   try {
-    let matchStage = {
-      userId: new mongoose.Types.ObjectId(userId),
+    const matchQuery = {
+      userId: userId,
       type: "expense",
       status: { $in: ["completed", "pending"] },
     };
 
     if (month) {
-      matchStage.$expr = {
-        $eq: [
-          {
-            $dateToString: {
-              format: "%Y-%m",
-              date: "$date",
-              timezone: TIMEZONE,
-            },
-          },
-          month,
-        ],
-      };
+      const year = parseInt(month.split("-")[0]);
+      const monthNumber = parseInt(month.split("-")[1]);
+      const startDate = new Date(Date.UTC(year, monthNumber - 1, 1));
+      const endDate = new Date(Date.UTC(year, monthNumber, 1));
+      endDate.setMilliseconds(endDate.getMilliseconds() - 1);
+
+      matchQuery.date = { $gte: startDate, $lte: endDate };
     }
 
+    if (categoryName) {
+      const category = await Category.findOne({
+        userId: userId,
+        name: { $regex: new RegExp(`^${categoryName.trim()}$`, "i") },
+      });
+      if (!category) {
+        return ["Nenhum gasto encontrado para esta categoria."];
+      }
+      matchQuery.categoryId = category._id.toString();
+    }
+    
     const pipeline = [
-      { $match: matchStage },
+      { $match: matchQuery },
       {
         $lookup: {
           from: "categories",
           let: { category_id_str: "$categoryId" },
           pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ["$_id", { $toObjectId: "$$category_id_str" }] },
-              },
-            },
+            { $match: { $expr: { $eq: ["$_id", { $toObjectId: "$$category_id_str" }] } } }
           ],
           as: "category",
         },
       },
       { $unwind: "$category" },
+      { $sort: { "category.name": 1, date: 1 } },
     ];
-
-    if (categoryName) {
-      pipeline.push({
-        $match: {
-          "category.name": {
-            $regex: new RegExp(`^${categoryName.trim()}$`, "i"),
-          },
-        },
-      });
-    }
-
-    pipeline.push({ $sort: { "category.name": 1, date: 1 } });
 
     const expenses = await Transaction.aggregate(pipeline);
 
@@ -336,7 +316,7 @@ export async function getExpenseDetails(
 export async function getIncomeDetails(userId, month, monthName, categoryName) {
   try {
     let matchStage = {
-      userId: new mongoose.Types.ObjectId(userId),
+      userId: userId,
       type: "income",
     };
     if (month) {
@@ -405,7 +385,7 @@ export async function getIncomeDetails(userId, month, monthName, categoryName) {
         income.category.name.slice(1);
       return ` 💰 ${
         income.description
-      } (em _${catName}_): R$ ${income.amount.toFixed(2)} (#${
+      } (em ${catName}): R$ ${income.amount.toFixed(2)} (#${
         income.messageId
       })`;
     });
@@ -423,10 +403,10 @@ export async function getIncomeDetails(userId, month, monthName, categoryName) {
 
 export async function getOrCreateCategory(userId, categoryName) {
   const standardizedName = categoryName.trim().toLowerCase();
-  let category = await Category.findOne({ userId, name: standardizedName });
+  let category = await Category.findOne({ userId: userId, name: standardizedName });
   if (!category) {
     category = new Category({
-      userId,
+      userId: userId,
       name: standardizedName,
       color: "#3498db",
     });
@@ -468,7 +448,7 @@ export async function getActiveInstallments(userId) {
     const activeInstallments = await Transaction.aggregate([
       {
         $match: {
-          userId: new mongoose.Types.ObjectId(userId),
+          userId: userId,
           installmentsGroupId: { $ne: null },
           status: "pending",
         },
