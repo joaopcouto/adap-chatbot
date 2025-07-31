@@ -97,13 +97,8 @@ router.post("/", async (req, res) => {
           );
         } else {
           try {
-            const {
-              totalAmount,
-              description,
-              installments,
-              categoryName,
-              installmentsGroupId,
-            } = previousData.payload;
+            const { totalAmount, description, installments, categoryName } =
+              previousData.payload;
             const installmentAmount = totalAmount / installments;
 
             let categoryDoc = await Category.findOne({
@@ -127,6 +122,16 @@ router.post("/", async (req, res) => {
               );
             }
 
+            // --- NOVA LÓGICA DE IDs ---
+            // 1. Gere todos os messageIds primeiro
+            const messageIds = Array.from({ length: installments }, () =>
+              generateId()
+            );
+
+            // 2. O groupId agora é o messageId da primeira parcela
+            const newInstallmentsGroupId = messageIds[0];
+            // --- FIM DA NOVA LÓGICA ---
+
             const transactionsToCreate = [];
             const purchaseDate = new Date();
             let startingMonthOffset = 0;
@@ -148,13 +153,13 @@ router.post("/", async (req, res) => {
                 amount: installmentAmount,
                 description: `${description} - ${i + 1}/${installments}`,
                 date: paymentDate,
-                messageId: generateId(),
+                messageId: messageIds[i],
                 type: "expense",
                 status: "pending",
                 installmentsCount: installments,
                 installmentsCurrent: i + 1,
-                installmentsGroupId: installmentsGroupId,
-                categoryId: categoryDoc._id,
+                installmentsGroupId: newInstallmentsGroupId,
+                categoryId: categoryDoc._id.toString(),
                 paymentMethodId: creditPaymentMethod._id.toString(),
               });
             }
@@ -168,7 +173,7 @@ router.post("/", async (req, res) => {
                   2
                 )}\n\n` +
                 `As ${installments} parcelas foram agendadas para todo dia ${dueDay}.\n` +
-                `Para cancelar, use o ID: *#${installmentsGroupId}*`
+                `Para cancelar, use o ID: *#${newInstallmentsGroupId}*`
             );
 
             delete conversationState[userIdString];
@@ -226,7 +231,6 @@ router.post("/", async (req, res) => {
                 break;
               }
 
-              const installmentsGroupId = generateGroupId();
               conversationState[userIdString] = {
                 awaiting: "installment_due_day",
                 payload: {
@@ -234,7 +238,6 @@ router.post("/", async (req, res) => {
                   description,
                   installments,
                   categoryName: finalCategoryName,
-                  installmentsGroupId: installmentsGroupId,
                 },
               };
               devLog(
@@ -552,7 +555,7 @@ router.post("/", async (req, res) => {
               if (transaction.installmentsGroupId) {
                 twiml.message(
                   `🚫 A transação #_${messageId}_ faz parte de um parcelamento. Para removê-la, você precisa excluir o parcelamento inteiro.\n\n` +
-                    `Use o comando: *excluir parcelamento #${transaction.installmentsGroupId}*`
+                    `Use o comando: *excluir parcelamento* #${transaction.installmentsGroupId}`
                 );
                 break;
               }
@@ -799,7 +802,7 @@ router.post("/", async (req, res) => {
               responseHasBeenSent = true;
 
               delete conversationState[userIdString];
-              break; 
+              break;
             }
 
             case "reminder": {
@@ -810,7 +813,7 @@ router.post("/", async (req, res) => {
                 );
                 break;
               }
-                         
+
               const localDateString = date.slice(0, 19);
               const dateToSave = fromZonedTime(localDateString, TIMEZONE);
 
@@ -823,7 +826,7 @@ router.post("/", async (req, res) => {
 
               const newReminder = new Reminder({
                 userId: userObjectId,
-                userPhoneNumber: req.body.From.replace('whatsapp:', ''),
+                userPhoneNumber: req.body.From.replace("whatsapp:", ""),
                 description: description,
                 date: dateToSave,
                 messageId: generateId(),
