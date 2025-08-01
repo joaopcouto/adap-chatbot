@@ -122,15 +122,11 @@ router.post("/", async (req, res) => {
               );
             }
 
-            // --- NOVA LÓGICA DE IDs ---
-            // 1. Gere todos os messageIds primeiro
             const messageIds = Array.from({ length: installments }, () =>
               generateId()
             );
 
-            // 2. O groupId agora é o messageId da primeira parcela
             const newInstallmentsGroupId = messageIds[0];
-            // --- FIM DA NOVA LÓGICA ---
 
             const transactionsToCreate = [];
             const purchaseDate = new Date();
@@ -255,6 +251,13 @@ router.post("/", async (req, res) => {
               const { amount, description, category } = interpretation.data;
               devLog(amount, description, category);
 
+              if (amount === null || isNaN(amount) || amount <= 0) {
+                twiml.message(
+                  "🚫 Não consegui identificar um valor válido para a receita. Por favor, tente novamente com um número positivo. Ex: 'Recebi 1000 salário'."
+                );
+                break;
+              }
+
               let finalCategoryName = category || "outro";
               if (
                 !VALID_CATEGORIES_INCOME.includes(finalCategoryName) &&
@@ -305,6 +308,13 @@ router.post("/", async (req, res) => {
             case "add_expense": {
               const { amount, description, category } = interpretation.data;
               devLog(amount, description, category);
+
+              if (amount === null || isNaN(amount) || amount <= 0) {
+                twiml.message(
+                  "🚫 Não consegui identificar um valor válido para a despesa. Por favor, tente novamente com um número positivo. Ex: '15 uber'."
+                );
+                break;
+              }
 
               let finalCategoryName = category || "outro";
               if (
@@ -365,6 +375,13 @@ router.post("/", async (req, res) => {
               devLog(
                 `Nova transação com categoria custom: ${newAmount}, ${newDescription}, ${newCategory}, ${newType}`
               );
+
+              if (newAmount === null || isNaN(newAmount) || newAmount <= 0) {
+                twiml.message(
+                  "🚫 Não consegui identificar um valor válido. Por favor, tente novamente com um número positivo."
+                );
+                break;
+              }
 
               if (!userHasFreeCategorization) {
                 twiml.message(

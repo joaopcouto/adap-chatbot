@@ -1,10 +1,7 @@
 import Transaction from "../models/Transaction.js";
 import Category from "../models/Category.js";
 import Reminder from "../models/Reminder.js";
-import {
-  TIMEZONE,
-  formatInBrazilWithTime,
-} from "../utils/dateUtils.js";
+import { TIMEZONE, formatInBrazilWithTime } from "../utils/dateUtils.js";
 import mongoose from "mongoose";
 
 const MESSAGE_LIMIT = 1550;
@@ -242,7 +239,7 @@ export async function getExpenseDetails(
       }
       matchQuery.categoryId = category._id.toString();
     }
-    
+
     const pipeline = [
       { $match: matchQuery },
       {
@@ -250,7 +247,11 @@ export async function getExpenseDetails(
           from: "categories",
           let: { category_id_str: "$categoryId" },
           pipeline: [
-            { $match: { $expr: { $eq: ["$_id", { $toObjectId: "$$category_id_str" }] } } }
+            {
+              $match: {
+                $expr: { $eq: ["$_id", { $toObjectId: "$$category_id_str" }] },
+              },
+            },
           ],
           as: "category",
         },
@@ -278,8 +279,10 @@ export async function getExpenseDetails(
         if (!expensesByCategory[cat]) {
           expensesByCategory[cat] = [];
         }
+        const amount =
+          expense.amount !== null ? expense.amount.toFixed(2) : "0.00";
         expensesByCategory[cat].push(
-          ` 💸 ${expense.description}: R$ ${expense.amount.toFixed(2)} (#${
+          ` 💸 ${expense.description}: R$ ${amount} (#${
             expense.messageId
           })`
         );
@@ -297,12 +300,11 @@ export async function getExpenseDetails(
       reportLines.push(
         `🧾 Detalhes dos gastos em _*${categoryName}*_ no mês de _*${monthName}*_:`
       );
-      const expenseItems = expenses.map(
-        (expense) =>
-          ` 💸 ${expense.description}: R$ ${expense.amount.toFixed(2)} (#${
-            expense.messageId
-          })`
-      );
+      const expenseItems = expenses.map((expense) => {
+        const amount =
+          expense.amount !== null ? expense.amount.toFixed(2) : "0.00";
+        return ` 💸 ${expense.description}: R$ ${amount} (#${expense.messageId})`;
+      });
       reportLines.push(...expenseItems);
     }
 
@@ -383,11 +385,10 @@ export async function getIncomeDetails(userId, month, monthName, categoryName) {
       const catName =
         income.category.name.charAt(0).toUpperCase() +
         income.category.name.slice(1);
+      const amount = income.amount !== null ? income.amount.toFixed(2) : "0.00";
       return ` 💰 ${
         income.description
-      } (em ${catName}): R$ ${income.amount.toFixed(2)} (#${
-        income.messageId
-      })`;
+      } (em ${catName}): R$ ${amount} (#${income.messageId})`;
     });
 
     reportLines.push(...incomeItems);
@@ -403,7 +404,10 @@ export async function getIncomeDetails(userId, month, monthName, categoryName) {
 
 export async function getOrCreateCategory(userId, categoryName) {
   const standardizedName = categoryName.trim().toLowerCase();
-  let category = await Category.findOne({ userId: userId, name: standardizedName });
+  let category = await Category.findOne({
+    userId: userId,
+    name: standardizedName,
+  });
   if (!category) {
     category = new Category({
       userId: userId,
