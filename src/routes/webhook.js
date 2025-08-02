@@ -66,8 +66,13 @@ router.post("/", async (req, res) => {
 
   if (!authorized) {
     twiml.message(
-      "🔒 Para utilizar o chatbot, você precisa adquirir o produto primeiro. Acesse: https://www.adapfinanceira.com.br/"
+      `Poxa 🥲, infelizmente o seu teste ou assinatura acabou.🔒
+
+Para continuar utilizando a sua assistente financeira e continuar deixando o seu financeiro organizado na palma da sua mão 💸, acesse o link abaixo e garanta já o seu plano: adapfinanceira.com.br/planos`
     );
+    res.writeHead(200, { "Content-Type": "text/xml" });
+    return res.end(twiml.toString());
+    
   } else {
     const userObjectId = user._id;
     const userIdString = user._id.toString();
