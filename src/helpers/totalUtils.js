@@ -225,7 +225,6 @@ export async function getExpenseDetails(
       const startDate = new Date(Date.UTC(year, monthNumber - 1, 1));
       const endDate = new Date(Date.UTC(year, monthNumber, 1));
       endDate.setMilliseconds(endDate.getMilliseconds() - 1);
-
       matchQuery.date = { $gte: startDate, $lte: endDate };
     }
 
@@ -235,83 +234,80 @@ export async function getExpenseDetails(
         name: { $regex: new RegExp(`^${categoryName.trim()}$`, "i") },
       });
       if (!category) {
-        return ["Nenhum gasto encontrado para esta categoria."];
+        return { messages: ["Nenhum gasto encontrado para esta categoria."], transactionIds: [] };
       }
       matchQuery.categoryId = category._id.toString();
     }
-
-    const pipeline = [
+    
+    const expenses = await Transaction.aggregate([
       { $match: matchQuery },
       {
-        $lookup: {
-          from: "categories",
-          let: { category_id_str: "$categoryId" },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ["$_id", { $toObjectId: "$$category_id_str" }] },
-              },
-            },
-          ],
-          as: "category",
-        },
+        $addFields: {
+          convertedCategoryId: { $toObjectId: "$categoryId" }
+        }
       },
-      { $unwind: "$category" },
-      { $sort: { "category.name": 1, date: 1 } },
-    ];
+      {
+        $lookup: {
+          from: "categories", 
+          localField: "convertedCategoryId",
+          foreignField: "_id",
+          as: "categoryDetails" 
+        }
+      },
+      {
+        $unwind: {
+          path: "$categoryDetails",
+          preserveNullAndEmptyArrays: true 
+        }
+      },
+      { $sort: { 'categoryDetails.name': 1, date: 1 } }
+    ]);
 
-    const expenses = await Transaction.aggregate(pipeline);
 
     if (expenses.length === 0) {
-      return ["Nenhum gasto encontrado para este período."];
+      return { messages: ["Nenhum gasto encontrado para este período."], transactionIds: [] };
     }
 
-    const reportLines = [];
+    const bodyLines = [];
+    const transactionIds = [];
+    let itemCounter = 1;
+    let currentCategoryName = '';
 
-    if (!categoryName) {
-      reportLines.push(
-        `🧾 Detalhes de todos os gastos no mês de _*${monthName}*_:`
-      );
+    for (const expense of expenses) {
+      const categoryDisplay = expense.categoryDetails && expense.categoryDetails.name
+        ? expense.categoryDetails.name.charAt(0).toUpperCase() + expense.categoryDetails.name.slice(1)
+        : 'Outro';
 
-      const expensesByCategory = {};
-      expenses.forEach((expense) => {
-        const cat = expense.category.name || "Sem Categoria";
-        if (!expensesByCategory[cat]) {
-          expensesByCategory[cat] = [];
-        }
-        const amount =
-          expense.amount !== null ? expense.amount.toFixed(2) : "0.00";
-        expensesByCategory[cat].push(
-          ` 💸 ${expense.description}: R$ ${amount} (#${
-            expense.messageId
-          })`
-        );
-      });
-
-      let i = 0;
-      for (const cat in expensesByCategory) {
-        const catNameFormatted = cat.charAt(0).toUpperCase() + cat.slice(1);
-        const prefix = i === 0 ? "" : "\n";
-        reportLines.push(`${prefix}📁 ${catNameFormatted}`);
-        reportLines.push(...expensesByCategory[cat]);
-        i++;
+      if (!categoryName && categoryDisplay !== currentCategoryName) {
+        const prefix = currentCategoryName === '' ? '' : '\n'; 
+        
+        bodyLines.push(`${prefix}📁 ${categoryDisplay}`);
+        currentCategoryName = categoryDisplay;
       }
-    } else {
-      reportLines.push(
-        `🧾 Detalhes dos gastos em _*${categoryName}*_ no mês de _*${monthName}*_:`
-      );
-      const expenseItems = expenses.map((expense) => {
-        const amount =
-          expense.amount !== null ? expense.amount.toFixed(2) : "0.00";
-        return ` 💸 ${expense.description}: R$ ${amount} (#${expense.messageId})`;
-      });
-      reportLines.push(...expenseItems);
+
+      const amount = expense.amount != null ? expense.amount.toFixed(2) : "0.00";
+      bodyLines.push(`${itemCounter}. ${expense.description}: R$ ${amount}`);
+      transactionIds.push(expense._id.toString());
+      itemCounter++;
     }
 
-    return chunkLinesIntoMessages(reportLines);
+    const header = categoryName
+      ? `🧾 Detalhes dos gastos em _*${categoryName}*_ no mês de _*${monthName}*:`
+      : `🧾 Detalhes de todos os gastos no mês de _*${monthName}*_:`;
+
+    const linesToChunk = [header, ...bodyLines];
+    const messageChunks = chunkLinesIntoMessages(linesToChunk);
+
+    const footer = `\n\nPara apagar um item, envie "apagar item" e o número (ex: *apagar item 3*).`;
+    if (messageChunks.length > 0) {
+      messageChunks[messageChunks.length - 1] += footer;
+    }
+
+    return { messages: messageChunks, transactionIds: transactionIds };
+
   } catch (error) {
     console.error("Erro ao buscar despesas por categoria:", error);
-    return ["Ocorreu um erro ao buscar os gastos. Tente novamente."];
+    return { messages: ["Ocorreu um erro ao buscar os gastos. Tente novamente."], transactionIds: [] };
   }
 }
 
@@ -320,85 +316,96 @@ export async function getIncomeDetails(userId, month, monthName, categoryName) {
     let matchStage = {
       userId: userId,
       type: "income",
+      status: { $in: ["completed", "pending"] },
     };
+
     if (month) {
       matchStage.$expr = {
         $eq: [
-          {
-            $dateToString: {
-              format: "%Y-%m",
-              date: "$date",
-              timezone: TIMEZONE,
-            },
-          },
+          { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } },
           month,
         ],
       };
     }
-
+    
     const pipeline = [
       { $match: matchStage },
+      { $addFields: { convertedCategoryId: { $toObjectId: "$categoryId" } } },
       {
         $lookup: {
           from: "categories",
-          let: { category_id_str: "$categoryId" },
-          pipeline: [
-            {
-              $match: {
-                $expr: { $eq: ["$_id", { $toObjectId: "$$category_id_str" }] },
-              },
-            },
-          ],
-          as: "category",
-        },
+          localField: "convertedCategoryId",
+          foreignField: "_id",
+          as: "categoryDetails"
+        }
       },
-      { $unwind: "$category" },
+      {
+        $unwind: {
+          path: "$categoryDetails",
+          preserveNullAndEmptyArrays: true
+        }
+      }
     ];
 
     if (categoryName) {
       pipeline.push({
         $match: {
-          "category.name": {
-            $regex: new RegExp(`^${categoryName.trim()}$`, "i"),
-          },
+          "categoryDetails.name": { $regex: new RegExp(`^${categoryName.trim()}$`, "i") },
         },
       });
     }
 
-    pipeline.push({ $sort: { date: 1 } });
+    pipeline.push({ $sort: { 'categoryDetails.name': 1, date: 1 } });
 
     const incomes = await Transaction.aggregate(pipeline);
 
     if (incomes.length === 0) {
-      return ["Nenhuma receita encontrada para este período."];
+      return { messages: ["Nenhuma receita encontrada para este período."], transactionIds: [] };
     }
 
-    const reportLines = [];
+    const bodyLines = [];
+    const transactionIds = [];
+    let itemCounter = 1;
+    let currentCategoryName = '';
 
+    for (const income of incomes) {
+      const categoryDisplay = income.categoryDetails && income.categoryDetails.name
+        ? income.categoryDetails.name.charAt(0).toUpperCase() + income.categoryDetails.name.slice(1)
+        : 'Outro';
+
+      if (!categoryName && categoryDisplay !== currentCategoryName) {
+        const prefix = currentCategoryName === '' ? '' : '\n';
+        
+        bodyLines.push(`${prefix}📁 ${categoryDisplay}`);
+        currentCategoryName = categoryDisplay;
+      }
+
+      const amount = income.amount != null ? income.amount.toFixed(2) : "0.00";
+      bodyLines.push(`${itemCounter}. ${income.description}: R$ ${amount}`);
+      transactionIds.push(income._id.toString());
+      itemCounter++;
+    }
+    
     const header = categoryName
-      ? `🧾 Detalhes das receitas de _*${categoryName}*_ no mês de _*${monthName}*_:`
+      ? `🧾 Detalhes das receitas de _*${categoryName}*_ no mês de _*${monthName}*:`
       : `🧾 Detalhes de todas as receitas no mês de _*${monthName}*_:`;
 
-    reportLines.push(header);
+    const linesToChunk = [header, ...bodyLines];
+    const messageChunks = chunkLinesIntoMessages(linesToChunk);
 
-    const incomeItems = incomes.map((income) => {
-      const catName =
-        income.category.name.charAt(0).toUpperCase() +
-        income.category.name.slice(1);
-      const amount = income.amount !== null ? income.amount.toFixed(2) : "0.00";
-      return ` 💰 ${
-        income.description
-      } (em ${catName}): R$ ${amount} (#${income.messageId})`;
-    });
+    const footer = `\n\nPara apagar um item, envie "apagar item" e o número (ex: *apagar item 3*).`;
+    if (messageChunks.length > 0) {
+      messageChunks[messageChunks.length - 1] += footer;
+    }
 
-    reportLines.push(...incomeItems);
-
-    return chunkLinesIntoMessages(reportLines);
+    return { messages: messageChunks, transactionIds: transactionIds };
+    
   } catch (error) {
     console.error("Erro ao buscar detalhes das receitas:", error);
-    return [
-      "Ocorreu um erro ao buscar os detalhes das receitas. Tente novamente.",
-    ];
+    return {
+      messages: ["Ocorreu um erro ao buscar os detalhes das receitas. Tente novamente."],
+      transactionIds: []
+    };
   }
 }
 

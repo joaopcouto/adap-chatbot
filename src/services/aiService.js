@@ -32,6 +32,7 @@ export async function interpretMessageWithAI(message, currentDate) {
       "add_installment_expense" → The user wants to log an expense in installments. The user will provide description, the TOTAL amount and the number of installments.
       "delete_installment_group" → The user wants to delete an entire installment plan. Extract the installmentsGroupId.
       "delete_transaction" → The user wants to delete an expense. Extract the messageId.
+      "delete_list_item" → O usuário quer apagar um item de uma lista numerada recém-exibida. Extraia o número do item.
       "generate_daily_chart" → The user wants to generate a daily expense chart. Extract the amount of days.  
       "generate_category_chart" → The user wants to generate a category-wise expense chart. Extract the days.
       "get_total_income" → The user wants to retrieve the total amout income.
@@ -74,12 +75,13 @@ export async function interpretMessageWithAI(message, currentDate) {
        Respond only with a valid JSON object without any additional formatting or explanation
      - Return a JSON object with the intent and extracted data. Use this format:
        {
-         "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "generate_daily_chart" | "generate_category_chart" | "get_total_income" |"get_total" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "financial_help",
+         "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "delete_list_item" | "generate_daily_chart" | "generate_category_chart" | "get_total_income" |"get_total" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "financial_help",
          "data": {
            "amount": number,
            "description": string,
            "category": string,
            "installmentsGroupId": string,
+           "itemNumber": number,
            "messageId": string,
            "days": number,
            "month": string,
@@ -124,6 +126,9 @@ export async function interpretMessageWithAI(message, currentDate) {
       Response: { "intent": "delete_installment_group", "data": { "installmentsGroupId": "J-9tpH" } }
     - User: "cancelar compra parcelada #PXewd"
       Response: { "intent": "delete_installment_group", "data": { "installmentsGroupId": "PXewd" } }
+    
+    - User: "apagar item 3"
+      Response: { "intent": "delete_list_item", "data": { "itemNumber": 3 } }
 
     - User: "QUAIS foram meus gastos nos últimos 10 dias?"
       Response: { "intent": "generate_daily_chart", "data": { "days": 10}}

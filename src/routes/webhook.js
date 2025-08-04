@@ -251,7 +251,6 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               );
               break;
             }
-
             case "add_income": {
               const { amount, description, category } = interpretation.data;
               devLog(amount, description, category);
@@ -309,7 +308,6 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
 
               break;
             }
-
             case "add_expense": {
               const { amount, description, category } = interpretation.data;
               devLog(amount, description, category);
@@ -369,7 +367,6 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
 
               break;
             }
-
             case "add_transaction_new_category": {
               const {
                 amount: newAmount,
@@ -477,7 +474,6 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
 
               break;
             }
-
             case "get_active_installments": {
               const installments = await getActiveInstallments(userIdString);
 
@@ -505,7 +501,6 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               twiml.message(responseMessage);
               break;
             }
-
             case "delete_installment_group": {
               let { installmentsGroupId } = interpretation.data;
               if (!installmentsGroupId) {
@@ -560,7 +555,6 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               }
               break;
             }
-
             case "delete_transaction": {
               const { messageId } = interpretation.data;
               const transaction = await Transaction.findOne({
@@ -622,12 +616,11 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               }
               break;
             }
-
             case "generate_daily_chart": {
               const { days = 7 } = interpretation.data;
               const daysToRequest = parseInt(days, 10);
               const reportData = await getExpensesReport(
-                userObjectId,
+                userIdString,
                 daysToRequest
               );
               if (reportData.length === 0) {
@@ -644,11 +637,10 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               }
               break;
             }
-
             case "generate_category_chart": {
               const { days = 30 } = interpretation.data;
               const categoryReport = await getCategoryReport(
-                userObjectId,
+                userIdString,
                 days
               );
               if (categoryReport.length === 0) {
@@ -664,7 +656,6 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               }
               break;
             }
-
             case "get_total": {
               let { category, month, monthName } = interpretation.data;
 
@@ -725,7 +716,6 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
 
               break;
             }
-
             case "get_total_income": {
               let { category, month, monthName } = interpretation.data;
 
@@ -786,21 +776,26 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
 
               break;
             }
-
             case "detalhes": {
               const previousData = conversationState[userIdString];
+              
+              if (!previousData || !previousData.type) {
+                twiml.message("Para ver os detalhes, primeiro peça um resumo dos seus gastos ou receitas. Por exemplo, envie 'gasto total' ou 'minhas receitas'.");
+                break;
+              }
+
               const { type, category, month, monthName } = previousData;
 
-              let messageChunks = [];
+              let result;
               if (type === "income") {
-                messageChunks = await getIncomeDetails(
+                result = await getIncomeDetails(
                   userIdString,
                   month,
                   monthName,
                   category
                 );
-              } else {
-                messageChunks = await getExpenseDetails(
+              } else { 
+                result = await getExpenseDetails(
                   userIdString,
                   month,
                   monthName,
@@ -808,25 +803,80 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                 );
               }
 
+              const { messages, transactionIds } = result;
+
+              if (transactionIds && transactionIds.length > 0) {
+                conversationState[userIdString] = {
+                  ...previousData,
+                  detailedList: transactionIds
+                };
+              } else {
+                delete conversationState[userIdString];
+              }
+
               const sendSequentially = async () => {
                 try {
-                  for (const chunk of messageChunks) {
+                  for (const chunk of messages) {
                     await sendTextMessage(req.body.From, chunk);
-                    await new Promise((resolve) => setTimeout(resolve, 500));
+                    await new Promise((resolve) => setTimeout(resolve, 500)); 
                   }
                 } catch (error) {
                   devLog("Erro no loop de envio sequencial:", error);
                 }
               };
               sendSequentially();
+
               res.writeHead(200, { "Content-Type": "text/xml" });
               res.end(new twilio.twiml.MessagingResponse().toString());
               responseHasBeenSent = true;
 
-              delete conversationState[userIdString];
               break;
             }
+            case "delete_list_item": {
+              const { itemNumber } = interpretation.data;
+              const state = conversationState[userIdString];
 
+              if (!state || !state.detailedList || state.detailedList.length === 0) {
+                twiml.message("Não encontrei uma lista de itens para apagar. Por favor, gere os 'detalhes' de seus gastos ou receitas primeiro.");
+                break;
+              }
+
+              const index = itemNumber - 1;
+
+              if (index < 0 || index >= state.detailedList.length) {
+                twiml.message(`Número de item inválido. Por favor, escolha um número entre 1 e ${state.detailedList.length}.`);
+                break;
+              }
+
+              const transactionIdToDelete = state.detailedList[index];
+
+              if (transactionIdToDelete === null) {
+                twiml.message(`🤔 O item número ${itemNumber} já foi apagado nesta sessão.`);
+                break;
+              }
+
+              const transaction = await Transaction.findById(transactionIdToDelete);
+
+              if (!transaction) {
+                conversationState[userIdString].detailedList[index] = null;
+                twiml.message("Ops, este item já foi apagado ou não foi encontrado no banco de dados.");
+                break;
+              }
+
+              await Transaction.findByIdAndDelete(transactionIdToDelete);
+
+              const updateField = transaction.type === 'income' ? 'totalIncome' : 'totalSpent';
+              await UserStats.findOneAndUpdate(
+                { userId: userObjectId },
+                { $inc: { [updateField]: -transaction.amount } }
+              );
+              
+              twiml.message(`✅ Item "${transaction.description}" no valor de R$ ${transaction.amount.toFixed(2)} foi apagado com sucesso!`);
+              
+              conversationState[userIdString].detailedList[index] = null;
+              
+              break;
+            }
             case "reminder": {
               const { description, date } = interpretation.data;
               if (!date) {
@@ -858,7 +908,6 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               await sendReminderMessage(twiml, userMessage, newReminder);
               break;
             }
-
             case "delete_reminder": {
               const { messageId } = interpretation.data;
               const reminder = await Reminder.findOneAndDelete({
@@ -870,13 +919,11 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               }
               break;
             }
-
             case "get_total_reminders": {
               const totalReminders = await getTotalReminders(userObjectId);
               sendTotalRemindersMessage(twiml, totalReminders);
               break;
             }
-
             case "financial_help": {
               if (!(await hasAccessToFeature(userObjectId, "adap-turbo"))) {
                 twiml.message(
@@ -887,12 +934,10 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               await sendFinancialHelpMessage(twiml, userMessage);
               break;
             }
-
             case "greeting": {
               sendGreetingMessage(twiml);
               break;
             }
-
             default:
               sendHelpMessage(twiml);
               break;
