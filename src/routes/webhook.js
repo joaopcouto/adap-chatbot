@@ -9,7 +9,7 @@ import User from "../models/User.js";
 import { fromZonedTime } from "date-fns-tz";
 import { TIMEZONE } from "../utils/dateUtils.js";
 
-import { interpretMessageWithAI } from "../services/aiService.js";
+import { interpretMessageWithAI, transcribeAudioWithWhisper } from "../services/aiService.js";
 import {
   calculateTotalExpenses,
   calculateTotalIncome,
@@ -56,11 +56,34 @@ let conversationState = {};
 
 router.post("/", async (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
-  const userMessage = req.body.Body;
+  let userMessage;
+  
+  // Handle audio messages
+  if (req.body.MediaUrl0 && req.body.MediaContentType0.includes("audio")) {
+    try {
+      userMessage = await transcribeAudioWithWhisper(req.body.MediaUrl0);
+    } catch (error) {
+      devLog("Erro ao transcrever áudio:", error);
+      twiml.message("❌ Desculpe, não consegui processar seu áudio. Tente enviar uma mensagem de texto.");
+      res.writeHead(200, { "Content-Type": "text/xml" });
+      return res.end(twiml.toString());
+    }
+  } else {
+    userMessage = req.body.Body;
+  }
+  
   const userPhoneNumber = fixPhoneNumber(req.body.From);
   let responseHasBeenSent = false;
 
   console.log(userPhoneNumber);
+
+  // Check if we have a valid message to process
+  if (!userMessage || userMessage.trim() === "") {
+    res.writeHead(200, { "Content-Type": "text/xml" });
+    return res.end(twiml.toString());
+  }
+
+  devLog(`Mensagem de ${userPhoneNumber} para processar: "${userMessage}"`);
 
   const { authorized, user } = await validateUserAccess(userPhoneNumber);
 
