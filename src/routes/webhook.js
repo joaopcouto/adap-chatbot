@@ -15,6 +15,7 @@ import {
   calculateTotalIncome,
   getExpensesReport,
   getCategoryReport,
+  getIncomeByCategoryReport,
   getTotalReminders,
   getExpenseDetails,
   getIncomeDetails,
@@ -24,6 +25,7 @@ import {
 import {
   generateChart,
   generateCategoryChart,
+  generateIncomeChart,
 } from "../services/chartService.js";
 import Transaction from "../models/Transaction.js";
 import PaymentMethod from "../models/PaymentMethod.js";
@@ -754,6 +756,23 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               } else {
                 const imageUrl = await generateCategoryChart(
                   categoryReport,
+                  userObjectId.toString()
+                );
+                twiml.message().media(imageUrl);
+              }
+              break;
+            }
+            case "generate_income_category_chart": {
+              const { days = 30 } = interpretation.data;
+              const incomeReport = await getIncomeByCategoryReport(userIdString, days);
+
+              if (incomeReport.length === 0) {
+                twiml.message(
+                  `📈 Você não tem receitas registradas nos últimos ${days} dias para gerar um relatório.`
+                );
+              } else {
+                const imageUrl = await generateIncomeChart(
+                  incomeReport,
                   userObjectId.toString()
                 );
                 twiml.message().media(imageUrl);
