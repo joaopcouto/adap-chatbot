@@ -159,8 +159,13 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
         if (userMessage.trim().toLowerCase() === 'sim') {
             const { totalAmount, storeName, category, purchaseDate } = previousData.payload;
             
-            const transactionDate = new Date(purchaseDate);
-            transactionDate.setHours(new Date().getHours(), new Date().getMinutes());
+            let transactionDate = new Date(`${purchaseDate}T12:00:00`);
+
+            if (isNaN(transactionDate.getTime())) {
+                devLog(`AVISO: Data inválida da IA ('${purchaseDate}'). Usando a data atual como fallback.`);
+                transactionDate = new Date();
+            }
+
 
             const description = `${storeName} - ${transactionDate.toLocaleDateString('pt-BR')}`;
             
