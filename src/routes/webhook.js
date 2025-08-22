@@ -9,7 +9,7 @@ import User from "../models/User.js";
 import { fromZonedTime } from "date-fns-tz";
 import { TIMEZONE } from "../utils/dateUtils.js";
 
-import { interpretMessageWithAI, transcribeAudioWithWhisper } from "../services/aiService.js";
+import { interpretMessageWithAI, transcribeAudioWithWhisper, interpretReceiptWithAI } from "../services/aiService.js";
 import {
   calculateTotalExpenses,
   calculateTotalIncome,
@@ -57,9 +57,14 @@ let conversationState = {};
 router.post("/", async (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
   let userMessage;
+  let isImage = false;
   
-  // Handle audio messages
-  if (req.body.MediaUrl0 && req.body.MediaContentType0.includes("audio")) {
+  // imagem
+  if (req.body.MediaUrl0 && req.body.MediaContentType0.includes("image")) {
+    isImage = true;
+  
+  // audio
+  } else if (req.body.MediaUrl0 && req.body.MediaContentType0.includes("audio")) {
     try {
       userMessage = await transcribeAudioWithWhisper(req.body.MediaUrl0);
     } catch (error) {
@@ -68,6 +73,7 @@ router.post("/", async (req, res) => {
       res.writeHead(200, { "Content-Type": "text/xml" });
       return res.end(twiml.toString());
     }
+  // texto
   } else {
     userMessage = req.body.Body;
   }
@@ -77,8 +83,7 @@ router.post("/", async (req, res) => {
 
   console.log(userPhoneNumber);
 
-  // Check if we have a valid message to process
-  if (!userMessage || userMessage.trim() === "") {
+  if ((!userMessage || userMessage.trim() === "") && !isImage) {
     res.writeHead(200, { "Content-Type": "text/xml" });
     return res.end(twiml.toString());
   }
@@ -116,7 +121,71 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
         22
       );
 
-      if (previousData.awaiting === "installment_due_day") {
+      if (isImage) {
+        twiml.message("🔍 Analisando sua nota fiscal... Só um instante.");
+        
+        res.writeHead(200, { "Content-Type": "text/xml" });
+        res.end(twiml.toString());
+        responseHasBeenSent = true;
+        
+        const result = await interpretReceiptWithAI(req.body.MediaUrl0);
+
+        if (!result.isReceipt || result.items.length === 0) {
+          await sendTextMessage(req.body.From, "🫤 Desculpe, não consegui identificar itens de uma nota fiscal nesta imagem. Você pode tentar outra foto ou digitar os gastos manualmente.");
+        } else {
+          let confirmationMessage = "🧾 Itens que identifiquei na sua nota:\n\n";
+          let total = 0;
+          result.items.forEach((item, index) => {
+            confirmationMessage += `${index + 1}. ${item.description} - R$ ${item.amount.toFixed(2)}\n`;
+            total += item.amount;
+          });
+          confirmationMessage += `\n*Total: R$ ${total.toFixed(2)}*\n\n`;
+          confirmationMessage += "A leitura está correta? Responda *sim* para registrar todos os itens.";
+
+          conversationState[userIdString] = {
+            awaiting: 'receipt_confirmation',
+            payload: {
+              items: result.items
+            }
+          };
+          
+          await sendTextMessage(req.body.From, confirmationMessage);
+        }
+
+      } else if (previousData.awaiting === "receipt_confirmation") {
+        if (userMessage.trim().toLowerCase() === 'sim') {
+            const { items } = previousData.payload;
+            const categoryDoc = await getOrCreateCategory(userIdString, "outro"); 
+            const defaultPaymentMethod = await PaymentMethod.findOne({ type: "pix" });
+
+            for (const item of items) {
+                const newExpense = new Transaction({
+                    userId: userIdString,
+                    amount: item.amount,
+                    description: item.description,
+                    categoryId: categoryDoc._id.toString(),
+                    type: "expense",
+                    date: new Date(),
+                    messageId: generateId(),
+                    paymentMethodId: defaultPaymentMethod._id.toString(),
+                    status: "completed",
+                });
+                await newExpense.save();
+                await UserStats.findOneAndUpdate(
+                  { userId: userObjectId },
+                  { $inc: { totalSpent: item.amount } },
+                  { upsert: true }
+                );
+            }
+
+            twiml.message(`✅ Ótimo! Registrei *${items.length}* ${items.length > 1 ? 'itens' : 'item'} da sua nota fiscal.`);
+            delete conversationState[userIdString];
+        } else {
+            twiml.message("Ok, operação cancelada. Se precisar, pode me enviar a foto novamente ou registrar os gastos manualmente.");
+            delete conversationState[userIdString]; 
+        }
+
+      } else if (previousData.awaiting === "installment_due_day") {
         const dueDay = parseInt(userMessage.trim(), 10);
 
         if (isNaN(dueDay) || dueDay < 1 || dueDay > 31) {
