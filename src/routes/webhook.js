@@ -130,22 +130,25 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
         
         const result = await interpretReceiptWithAI(req.body.MediaUrl0);
 
-        if (!result.isReceipt || result.items.length === 0) {
-          await sendTextMessage(req.body.From, "🫤 Desculpe, não consegui identificar itens de uma nota fiscal nesta imagem. Você pode tentar outra foto ou digitar os gastos manualmente.");
+        if (!result.isReceipt || !result.data) {
+          await sendTextMessage(req.body.From, "🫤 Desculpe, não consegui identificar os dados de uma nota fiscal nesta imagem. Tente uma foto mais nítida.");
         } else {
-          let confirmationMessage = "🧾 Itens que identifiquei na sua nota:\n\n";
-          let total = 0;
-          result.items.forEach((item, index) => {
-            confirmationMessage += `${index + 1}. ${item.description} - R$ ${item.amount.toFixed(2)}\n`;
-            total += item.amount;
-          });
-          confirmationMessage += `\n*Total: R$ ${total.toFixed(2)}*\n\n`;
-          confirmationMessage += "A leitura está correta? Responda *sim* para registrar todos os itens.";
+          const { totalAmount, storeName, category, purchaseDate } = result.data;
+          
+          const [year, month, day] = purchaseDate.split('-');
+          const formattedDate = `${day}/${month}/${year}`;
+
+          let confirmationMessage = `🧾 Compra identificada:\n\n`;
+          confirmationMessage += `*Loja:* ${storeName}\n`;
+          confirmationMessage += `*Valor Total:* R$ ${totalAmount.toFixed(2)}\n`;
+          confirmationMessage += `*Data:* ${formattedDate}\n`;
+          confirmationMessage += `*Categoria Sugerida:* ${category}\n\n`;
+          confirmationMessage += "Deseja registrar essa despesa? Responda *sim* para confirmar.";
 
           conversationState[userIdString] = {
             awaiting: 'receipt_confirmation',
             payload: {
-              items: result.items
+              ...result.data
             }
           };
           
@@ -154,31 +157,35 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
 
       } else if (previousData.awaiting === "receipt_confirmation") {
         if (userMessage.trim().toLowerCase() === 'sim') {
-            const { items } = previousData.payload;
-            const categoryDoc = await getOrCreateCategory(userIdString, "outro"); 
+            const { totalAmount, storeName, category, purchaseDate } = previousData.payload;
+            
+            const transactionDate = new Date(purchaseDate);
+            transactionDate.setHours(new Date().getHours(), new Date().getMinutes());
+
+            const description = `${storeName} - ${transactionDate.toLocaleDateString('pt-BR')}`;
+            
+            const categoryDoc = await getOrCreateCategory(userIdString, category.toLowerCase());
             const defaultPaymentMethod = await PaymentMethod.findOne({ type: "pix" });
 
-            for (const item of items) {
-                const newExpense = new Transaction({
-                    userId: userIdString,
-                    amount: item.amount,
-                    description: item.description,
-                    categoryId: categoryDoc._id.toString(),
-                    type: "expense",
-                    date: new Date(),
-                    messageId: generateId(),
-                    paymentMethodId: defaultPaymentMethod._id.toString(),
-                    status: "completed",
-                });
-                await newExpense.save();
-                await UserStats.findOneAndUpdate(
-                  { userId: userObjectId },
-                  { $inc: { totalSpent: item.amount } },
-                  { upsert: true }
-                );
-            }
+            const newExpense = new Transaction({
+                userId: userIdString,
+                amount: totalAmount,
+                description: description,
+                categoryId: categoryDoc._id.toString(),
+                type: "expense",
+                date: transactionDate,
+                messageId: generateId(),
+                paymentMethodId: defaultPaymentMethod._id.toString(),
+                status: "completed",
+            });
+            await newExpense.save();
+            await UserStats.findOneAndUpdate(
+              { userId: userObjectId },
+              { $inc: { totalSpent: totalAmount } },
+              { upsert: true }
+            );
 
-            twiml.message(`✅ Ótimo! Registrei *${items.length}* ${items.length > 1 ? 'itens' : 'item'} da sua nota fiscal.`);
+            twiml.message(`✅ Despesa de *${storeName}* no valor de *R$ ${totalAmount.toFixed(2)}* registrada com sucesso!`);
             delete conversationState[userIdString];
         } else {
             twiml.message("Ok, operação cancelada. Se precisar, pode me enviar a foto novamente ou registrar os gastos manualmente.");

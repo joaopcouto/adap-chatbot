@@ -246,20 +246,47 @@ export async function interpretMessageWithAI(message, currentDate) {
   }
 }
 
-async function transcribeReceiptImage(base64Image, mimeType) {
-  const prompt = `Você é um serviço de Reconhecimento Óptico de Caracteres (OCR) altamente preciso. Sua única função é extrair e transcrever o texto da imagem fornecida, de forma literal e bruta.
+export async function interpretReceiptWithAI(imageUrl) {
+  const prompt = `Você é um especialista em analisar IMAGENS de notas fiscais brasileiras. Sua tarefa é olhar para a imagem, entender o layout e extrair um resumo JSON preciso da compra.
 
-  REGRAS ESTRITAS:
-  1.  **TRANSCREVA APENAS:** Retorne única e exclusivamente o texto que você vê na imagem.
-  2.  **SEM INTERPRETAÇÃO:** Não analise, resuma, entenda ou comente sobre o conteúdo.
-  3.  **SEM RECUSAS:** Não se desculpe, não se recuse a fazer a tarefa, não forneça explicações.
-  4.  **MANTENHA A FORMATAÇÃO:** Preserve as quebras de linha e o espaçamento o máximo possível para manter a estrutura original do recibo.
+  **LÓGICA DE PRIORIDADE PARA O VALOR TOTAL (A REGRA MAIS IMPORTANTE):**
+  A nota pode ter múltiplos valores totais. Sua prioridade MÁXIMA é encontrar o valor final que o cliente realmente pagou. Siga esta ordem estrita:
+  1.  **Prioridade 1:** Procure pela linha que contém "Valor a Pagar" ou "Total a Pagar". Este é quase sempre o valor correto.
+  2.  **Prioridade 2:** Se a Prioridade 1 não existir, procure pelo valor numérico que está na mesma linha da forma de pagamento (ex: "Cartão de Débito", "Dinheiro").
+  3.  **Prioridade 3 (Último Recurso):** Somente se nenhuma das anteriores for encontrada, use o valor da linha "Valor Total" ou "Total R$".
 
-  Sua saída deve ser apenas o texto bruto extraído.`;
+  **OUTRAS INSTRUÇÕES:**
+  - **storeName**: Extraia o nome do estabelecimento.
+  - **purchaseDate**: Encontre a data da compra e retorne no formato YYYY-MM-DD.
+  - **category**: Sugira uma categoria baseada no tipo de loja (Supermercado -> "Alimentação", Posto de Gasolina -> "Transporte", Farmácia -> "Saúde", Restaurante -> "Alimentação", Lojas -> "Compras", etc.).
+  - **Conversão de Moeda:** Converta a VÍRGULA decimal brasileira para PONTO (ex: "445,79" se torna 445.79).
+
+  Responda APENAS com o objeto JSON final.
+
+  Exemplo de Resposta:
+  {
+    "isReceipt": true,
+    "data": {
+      "totalAmount": 445.79,
+      "storeName": "ATACADÃO S.A.",
+      "category": "Alimentação",
+      "purchaseDate": "2022-06-02"
+    }
+  }`;
 
   try {
+    const imageResponse = await axios({
+      method: 'get',
+      url: imageUrl,
+      responseType: 'arraybuffer',
+      auth: { username: process.env.TWILIO_ACCOUNT_SID, password: process.env.TWILIO_AUTH_TOKEN },
+    });
+
+    const base64Image = Buffer.from(imageResponse.data, 'binary').toString('base64');
+    const mimeType = imageResponse.headers['content-type'];
+
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4o", 
       messages: [
         {
           role: "user",
@@ -267,89 +294,21 @@ async function transcribeReceiptImage(base64Image, mimeType) {
             { type: "text", text: prompt },
             {
               type: "image_url",
-              image_url: {
-                url: `data:${mimeType};base64,${base64Image}`,
-              },
+              image_url: { url: `data:${mimeType};base64,${base64Image}` },
             },
           ],
         },
       ],
-      max_tokens: 2000,
-    });
-    return response.choices[0].message.content;
-  } catch (error) {
-    console.error("Erro na Etapa 1 (Transcrição de Imagem):", error);
-    return null;
-  }
-}
-
-export async function extractItemsFromText(rawText) {
-  const prompt = `Você é um especialista em analisar texto de notas fiscais brasileiras. Analise o texto abaixo e extraia uma lista de itens com descrição e preço.
-
-  Texto da Nota Fiscal:
-  """
-  ${rawText}
-  """
-
-  Instruções:
-  1.  Foque em extrair a lista de produtos/serviços com a maior precisão possível.
-  2.  **REGRA CRÍTICA DE MOEDA:** Valores monetários em notas fiscais brasileiras usam VÍRGULA como separador decimal (ex: "R$ 10,99"). Ao extrair o valor numérico para o JSON, você OBRIGATORIAMENTE deve converter a vírgula para um PONTO (ex: 10.99). Nunca arredonde os valores.
-  3.  Ignore informações como códigos de produto, peso, impostos, subtotais e totais.
-  4.  Retorne a resposta APENAS em formato JSON, seguindo a estrutura:
-      {
-        "isReceipt": true,
-        "items": [
-          { "description": "nome do item 1", "amount": 15.99 },
-          { "description": "nome do item 2", "amount": 8.50 }
-        ]
-      }
-  5. Se o texto não parece ser de uma nota fiscal, retorne {"isReceipt": false, "items": []}.`;
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }],
       max_tokens: 1000,
     });
-    
-    const cleanResponse = response.choices[0].message.content
-      .replace(/```json\n|```/g, "")
-      .trim();
-    return JSON.parse(cleanResponse);
 
-  } catch (error) {
-    console.error("Erro na Etapa 2 (Extração de Texto):", error);
-    return { isReceipt: false, items: [] };
-  }
-}
-
-export async function interpretReceiptWithAI(imageUrl) {
-  try {
-    const imageResponse = await axios({
-      method: 'get',
-      url: imageUrl,
-      responseType: 'arraybuffer',
-      auth: {
-        username: process.env.TWILIO_ACCOUNT_SID,
-        password: process.env.TWILIO_AUTH_TOKEN,
-      },
-    });
-
-    const base64Image = Buffer.from(imageResponse.data, 'binary').toString('base64');
-    const mimeType = imageResponse.headers['content-type'];
-    
-    const rawText = await transcribeReceiptImage(base64Image, mimeType);
-    if (!rawText) {
-      return { isReceipt: false, items: [] };
-    }
-
-    devLog("--- Texto Transcrito da Nota Fiscal ---\n", rawText, "\n-------------------------------------");
-    const structuredData = await extractItemsFromText(rawText);
-
-    return structuredData;
+    const cleanResponse = response.choices[0].message.content.replace(/```json\n|```/g, "").trim();
+    devLog("--- Resposta da IA (Análise Visual Direta) ---\n", cleanResponse, "\n-------------------------------------");
+    const result = JSON.parse(cleanResponse);
+    return result;
 
   } catch (error) {
     console.error("Erro no processo de interpretação de nota fiscal:", error);
-    return { isReceipt: false, items: [] };
+    return { isReceipt: false, data: null };
   }
 }
