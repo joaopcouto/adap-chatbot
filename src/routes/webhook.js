@@ -9,7 +9,7 @@ import User from "../models/User.js";
 import { fromZonedTime } from "date-fns-tz";
 import { TIMEZONE } from "../utils/dateUtils.js";
 
-import { interpretMessageWithAI, transcribeAudioWithWhisper } from "../services/aiService.js";
+import { interpretMessageWithAI, transcribeAudioWithWhisper, interpretReceiptWithAI } from "../services/aiService.js";
 import {
   calculateTotalExpenses,
   calculateTotalIncome,
@@ -57,9 +57,14 @@ let conversationState = {};
 router.post("/", async (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
   let userMessage;
+  let isImage = false;
   
-  // Handle audio messages
-  if (req.body.MediaUrl0 && req.body.MediaContentType0.includes("audio")) {
+  // imagem
+  if (req.body.MediaUrl0 && req.body.MediaContentType0.includes("image")) {
+    isImage = true;
+  
+  // audio
+  } else if (req.body.MediaUrl0 && req.body.MediaContentType0.includes("audio")) {
     try {
       userMessage = await transcribeAudioWithWhisper(req.body.MediaUrl0);
     } catch (error) {
@@ -68,6 +73,7 @@ router.post("/", async (req, res) => {
       res.writeHead(200, { "Content-Type": "text/xml" });
       return res.end(twiml.toString());
     }
+  // texto
   } else {
     userMessage = req.body.Body;
   }
@@ -77,8 +83,7 @@ router.post("/", async (req, res) => {
 
   console.log(userPhoneNumber);
 
-  // Check if we have a valid message to process
-  if (!userMessage || userMessage.trim() === "") {
+  if ((!userMessage || userMessage.trim() === "") && !isImage) {
     res.writeHead(200, { "Content-Type": "text/xml" });
     return res.end(twiml.toString());
   }
@@ -116,7 +121,83 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
         22
       );
 
-      if (previousData.awaiting === "installment_due_day") {
+      if (isImage) {
+        twiml.message("🔍 Analisando sua nota fiscal... Só um instante.");
+        
+        res.writeHead(200, { "Content-Type": "text/xml" });
+        res.end(twiml.toString());
+        responseHasBeenSent = true;
+        
+        const result = await interpretReceiptWithAI(req.body.MediaUrl0);
+
+        if (!result.isReceipt || !result.data) {
+          await sendTextMessage(req.body.From, "🫤 Desculpe, não consegui identificar os dados de uma nota fiscal nesta imagem. Tente uma foto mais nítida.");
+        } else {
+          const { totalAmount, storeName, category, purchaseDate } = result.data;
+          
+          const [year, month, day] = purchaseDate.split('-');
+          const formattedDate = `${day}/${month}/${year}`;
+
+          let confirmationMessage = `🧾 Compra identificada:\n\n`;
+          confirmationMessage += `*Loja:* ${storeName}\n`;
+          confirmationMessage += `*Valor Total:* R$ ${totalAmount.toFixed(2)}\n`;
+          confirmationMessage += `*Data:* ${formattedDate}\n`;
+          confirmationMessage += `*Categoria Sugerida:* ${category}\n\n`;
+          confirmationMessage += "Deseja registrar essa despesa? Responda *sim* para confirmar.";
+
+          conversationState[userIdString] = {
+            awaiting: 'receipt_confirmation',
+            payload: {
+              ...result.data
+            }
+          };
+          
+          await sendTextMessage(req.body.From, confirmationMessage);
+        }
+
+      } else if (previousData.awaiting === "receipt_confirmation") {
+        if (userMessage.trim().toLowerCase() === 'sim') {
+            const { totalAmount, storeName, category, purchaseDate } = previousData.payload;
+            
+            let transactionDate = new Date(`${purchaseDate}T12:00:00`);
+
+            if (isNaN(transactionDate.getTime())) {
+                devLog(`AVISO: Data inválida da IA ('${purchaseDate}'). Usando a data atual como fallback.`);
+                transactionDate = new Date();
+            }
+
+
+            const description = `${storeName} - ${transactionDate.toLocaleDateString('pt-BR')}`;
+            
+            const categoryDoc = await getOrCreateCategory(userIdString, category.toLowerCase());
+            const defaultPaymentMethod = await PaymentMethod.findOne({ type: "pix" });
+
+            const newExpense = new Transaction({
+                userId: userIdString,
+                amount: totalAmount,
+                description: description,
+                categoryId: categoryDoc._id.toString(),
+                type: "expense",
+                date: transactionDate,
+                messageId: generateId(),
+                paymentMethodId: defaultPaymentMethod._id.toString(),
+                status: "completed",
+            });
+            await newExpense.save();
+            await UserStats.findOneAndUpdate(
+              { userId: userObjectId },
+              { $inc: { totalSpent: totalAmount } },
+              { upsert: true }
+            );
+
+            twiml.message(`✅ Despesa de *${storeName}* no valor de *R$ ${totalAmount.toFixed(2)}* registrada com sucesso!`);
+            delete conversationState[userIdString];
+        } else {
+            twiml.message("Ok, operação cancelada. Se precisar, pode me enviar a foto novamente ou registrar os gastos manualmente.");
+            delete conversationState[userIdString]; 
+        }
+
+      } else if (previousData.awaiting === "installment_due_day") {
         const dueDay = parseInt(userMessage.trim(), 10);
 
         if (isNaN(dueDay) || dueDay < 1 || dueDay > 31) {

@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import { promisify } from "util";
 import stream from "stream";
+import { devLog } from "../helpers/logger.js";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -242,5 +243,72 @@ export async function interpretMessageWithAI(message, currentDate) {
       response.choices[0].message.content
     );
     return { intent: "financial_help", data: {} };
+  }
+}
+
+export async function interpretReceiptWithAI(imageUrl) {
+  const prompt = `Você é um especialista em analisar IMAGENS de notas fiscais brasileiras. Sua tarefa é olhar para a imagem, entender o layout e extrair um resumo JSON preciso da compra.
+
+  **LÓGICA DE PRIORIDADE PARA O VALOR TOTAL (A REGRA MAIS IMPORTANTE):**
+  A nota pode ter múltiplos valores totais. Sua prioridade MÁXIMA é encontrar o valor final que o cliente realmente pagou. Siga esta ordem estrita:
+  1.  **Prioridade 1:** Procure pela linha que contém "Valor a Pagar" ou "Total a Pagar". Este é quase sempre o valor correto.
+  2.  **Prioridade 2:** Se a Prioridade 1 não existir, procure pelo valor numérico que está na mesma linha da forma de pagamento (ex: "Cartão de Débito", "Dinheiro").
+  3.  **Prioridade 3 (Último Recurso):** Somente se nenhuma das anteriores for encontrada, use o valor da linha "Valor Total" ou "Total R$".
+
+  **OUTRAS INSTRUÇÕES:**
+  - **storeName**: Extraia o nome do estabelecimento.
+  - **purchaseDate**: Encontre a data da compra e retorne no formato YYYY-MM-DD.
+  - **category**: Sugira uma categoria baseada no tipo de loja (Supermercado -> "Alimentação", Posto de Gasolina -> "Transporte", Farmácia -> "Saúde", Restaurante -> "Alimentação", Lojas -> "Compras", etc.).
+  - **Conversão de Moeda:** Converta a VÍRGULA decimal brasileira para PONTO (ex: "445,79" se torna 445.79).
+
+  Responda APENAS com o objeto JSON final.
+
+  Exemplo de Resposta:
+  {
+    "isReceipt": true,
+    "data": {
+      "totalAmount": 445.79,
+      "storeName": "ATACADÃO S.A.",
+      "category": "Alimentação",
+      "purchaseDate": "2022-06-02"
+    }
+  }`;
+
+  try {
+    const imageResponse = await axios({
+      method: 'get',
+      url: imageUrl,
+      responseType: 'arraybuffer',
+      auth: { username: process.env.TWILIO_ACCOUNT_SID, password: process.env.TWILIO_AUTH_TOKEN },
+    });
+
+    const base64Image = Buffer.from(imageResponse.data, 'binary').toString('base64');
+    const mimeType = imageResponse.headers['content-type'];
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o", 
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            {
+              type: "image_url",
+              image_url: { url: `data:${mimeType};base64,${base64Image}` },
+            },
+          ],
+        },
+      ],
+      max_tokens: 1000,
+    });
+
+    const cleanResponse = response.choices[0].message.content.replace(/```json\n|```/g, "").trim();
+    devLog("--- Resposta da IA (Análise Visual Direta) ---\n", cleanResponse, "\n-------------------------------------");
+    const result = JSON.parse(cleanResponse);
+    return result;
+
+  } catch (error) {
+    console.error("Erro no processo de interpretação de nota fiscal:", error);
+    return { isReceipt: false, data: null };
   }
 }
