@@ -9,7 +9,6 @@ export async function generateChart(expenses, userId, days) {
     const tempFilePath = path.join("/tmp", `temp_expenses_${sanitizedUserId}.json`);
     const outputImagePath = path.join("/tmp", `report_${sanitizedUserId}.png`);
 
-    // 🚀 Salvar o JSON para o Python ler
     fs.writeFileSync(tempFilePath, JSON.stringify(expenses, null, 2));
 
     if (!fs.existsSync(tempFilePath)) {
@@ -36,7 +35,6 @@ export async function generateChart(expenses, userId, days) {
       const output = data.toString().trim();
       console.log("📤 Saída do Python:", output);
 
-      // Se for uma URL válida, armazenar
       if (output.startsWith("http")) {
         imageUrl = output;
       }
@@ -54,7 +52,6 @@ export async function generateChart(expenses, userId, days) {
 
       try {
         fs.unlinkSync(tempFilePath);
-        // fs.unlinkSync(outputImagePath); // opcional
       } catch (err) {
         console.warn("⚠️ Erro ao remover arquivos temporários:", err.message);
       }
@@ -62,9 +59,8 @@ export async function generateChart(expenses, userId, days) {
       if (imageUrl) {
         resolve(imageUrl);
       } else {
-        // Se errorOutput tiver conteúdo, usamos ele. Senão, uma mensagem padrão.
         const finalError = errorOutput || "Ocorreu um erro ao gerar a imagem.";
-        reject(finalError); // Rejeita a promise com a mensagem do Python!
+        reject(finalError); 
       }
     });
   });
@@ -121,7 +117,48 @@ script.on("exit", () => {
 
     script.on("exit", () => {
       console.log("🗑️ Removendo JSON temporário...");
-      // fs.unlinkSync(tempFilePath);
+    });
+  });
+}
+
+export async function generateIncomeChart(incomeData, userId) {
+  return new Promise((resolve, reject) => {
+    const sanitizedUserId = userId.replace(/[^a-zA-Z0-9]/g, "_");
+
+    const tempFilePath = path.join("/tmp", `temp_income_${sanitizedUserId}.json`);
+    const outputImagePath = path.join("/tmp", `income_report_${sanitizedUserId}.png`);
+
+    fs.writeFileSync(tempFilePath, JSON.stringify(incomeData, null, 2));
+
+    const pythonCommand = process.platform === "win32" ? "python" : "python3";
+    const script = spawn(pythonCommand, [
+      "generate_income_chart.py",
+      tempFilePath,
+      outputImagePath,
+    ]);
+
+    let imageUrl = "";
+    let errorOutput = "";
+
+    script.stdout.on("data", (data) => {
+      const output = data.toString().trim();
+      if (output.startsWith("http")) {
+        imageUrl = output;
+      }
+    });
+
+    script.stderr.on("data", (data) => {
+      errorOutput += data.toString();
+      console.error("❌ Erro do Python (Receitas):", data.toString());
+    });
+
+    script.on("exit", (code) => {
+      fs.unlinkSync(tempFilePath);
+      if (code === 0 && imageUrl) {
+        resolve(imageUrl);
+      } else {
+        reject(errorOutput || "Ocorreu um erro ao gerar o gráfico de receitas.");
+      }
     });
   });
 }

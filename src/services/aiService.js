@@ -76,6 +76,7 @@ export async function interpretMessageWithAI(message, currentDate) {
       "delete_list_item" → O usuário quer apagar um item de uma lista numerada recém-exibida. Extraia o número do item.
       "generate_daily_chart" → O usuário quer gerar um gráfico de despesas diárias. Extraia a quantidade de dias.  
       "generate_category_chart" → O usuário quer gerar um gráfico de despesas por categoria. Extraia os dias.
+      "generate_income_category_chart" → O usuário quer gerar um gráfico de receitas por categoria. Extraia os dias.
       "get_total_income" → O usuário quer recuperar o valor total de receitas.
       "get_total" → O usuário quer recuperar o valor total gasto ou recebido para um mês específico, ou o mês atual, opcionalmente filtrado por uma categoria específica.
       "get_active_installments" → O usuário quer uma lista de todos os seus planos de parcelamento ativos.
@@ -108,15 +109,17 @@ export async function interpretMessageWithAI(message, currentDate) {
     - O assistente deve ler solicitações em português brasileiro e responder em português brasileiro.
 
     . Distinções Importantes:
-     - Se o usuário perguntar **"onde"** (onde ocorreram as despesas) → use "generate_category_chart" (categorizado por categoria).
-     - Se o usuário perguntar **"quais"** (quais despesas foram feitas) → use "generate_daily_chart" (categorizado por dia).
-     Seja preciso: "onde" é sobre localização/tipo, "quais" é sobre listar as despesas dia a dia.
+      - Se o usuário perguntar **"onde"** (onde ocorreram as despesas) → use "generate_category_chart" (categorizado por categoria).
+      - Se o usuário perguntar **"quais"** (quais despesas foram feitas) → use "generate_daily_chart" (categorizado por dia).
+        Seja preciso: "onde" é sobre localização/tipo, "quais" é sobre listar as despesas dia a dia.
+      - Se a pergunta envolver **"receitas"**, **"ganhos"** ou **"de onde veio"** e pedir um gráfico → use "generate_income_category_chart".
+        Ex: "gráfico dos meus ganhos", "de onde vieram minhas receitas nos últimos 10 dias".
   
   4. Formato de Resposta:
        Responda apenas com um objeto JSON válido sem qualquer formatação ou explicação adicional
      - Retorne um objeto JSON com a intenção e dados extraídos. Use este formato:
        {
-         "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "delete_list_item" | "generate_daily_chart" | "generate_category_chart" | "get_total_income" |"get_total" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "financial_help",
+         "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "delete_list_item" | "generate_daily_chart" | "generate_category_chart" | "generate_income_category_chart" | "get_total_income" |"get_total" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "financial_help",
          "data": {
            "amount": number,
            "description": string,
@@ -173,9 +176,10 @@ export async function interpretMessageWithAI(message, currentDate) {
 
     - Usuário: "QUAIS foram meus gastos nos últimos 10 dias?"
       Resposta: { "intent": "generate_daily_chart", "data": { "days": 10}}
-
     - Usuário: "ONDE foram meus gastos nos últimos 7 dias?"
       Resposta: { "intent": "generate_category_chart", "data": { "days": 7}}
+    - Usuário: "me mostre um gráfico das minhas receitas"
+      Resposta: { "intent": "generate_income_category_chart", "data": { "days": 30}}
 
     - Usuário: "Qual é o meu gasto total?"
       Resposta: { "intent": "get_total", "data": {} }

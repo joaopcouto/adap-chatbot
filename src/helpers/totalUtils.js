@@ -426,6 +426,43 @@ export async function getOrCreateCategory(userId, categoryName) {
   return category;
 }
 
+export async function getIncomeByCategoryReport(userId, days) {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+
+  return Transaction.aggregate([
+    {
+      $match: {
+        userId,
+        type: "income", 
+        date: { $gte: startDate },
+        status: { $in: ["completed", "pending"] },
+      },
+    },
+    {
+      $lookup: {
+        from: "categories",
+        let: { category_id_str: "$categoryId" },
+        pipeline: [
+          {
+            $match: {
+              $expr: { $eq: ["$_id", { $toObjectId: "$$category_id_str" }] },
+            },
+          },
+        ],
+        as: "category",
+      },
+    },
+    { $unwind: "$category" },
+    {
+      $group: {
+        _id: "$category.name",
+        total: { $sum: "$amount" },
+      },
+    },
+  ]);
+}
+
 export async function getTotalReminders(userId) {
   const allFutureRemindersArray = await Reminder.find({
     userId: new mongoose.Types.ObjectId(userId),
