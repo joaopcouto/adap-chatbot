@@ -40,11 +40,27 @@ function chunkLinesIntoMessages(lines) {
   return finalMessages;
 }
 
-export async function calculateTotalIncome(
-  userId,
-  month = null,
-  categoryName = null
-) {
+export async function getMonthlySummary(userId, month) {
+  try {
+    const totalIncome = await calculateTotalIncome(userId, month);
+    
+    const totalExpenses = await calculateTotalExpenses(userId, null, month);
+
+    const balance = totalIncome - totalExpenses;
+
+    return {
+      income: totalIncome,
+      expenses: totalExpenses,
+      balance: balance,
+    };
+
+  } catch (err) {
+    console.error("Erro ao buscar o resumo mensal:", err);
+    return { income: 0, expenses: 0, balance: 0 };
+  }
+}
+
+export async function calculateTotalIncome(userId, month = null, categoryName = null) {
   try {
     const pipeline = [];
     let initialMatch = {

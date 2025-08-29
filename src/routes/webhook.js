@@ -11,6 +11,7 @@ import { TIMEZONE } from "../utils/dateUtils.js";
 
 import { interpretMessageWithAI, transcribeAudioWithWhisper, interpretReceiptWithAI } from "../services/aiService.js";
 import {
+  getMonthlySummary,
   calculateTotalExpenses,
   calculateTotalIncome,
   getExpensesReport,
@@ -845,58 +846,40 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               if (!month || !monthName) {
                 const now = new Date();
                 const currentYear = now.getFullYear();
-                const currentMonth = String(now.getMonth() + 1).padStart(
-                  2,
-                  "0"
-                );
+                const currentMonth = String(now.getMonth() + 1).padStart(2, "0");
                 month = `${currentYear}-${currentMonth}`;
-                const monthNameRaw = now.toLocaleString("pt-BR", {
-                  month: "long",
-                });
-                monthName =
-                  monthNameRaw.charAt(0).toUpperCase() + monthNameRaw.slice(1);
+                const monthNameRaw = now.toLocaleString("pt-BR", { month: "long" });
+                monthName = monthNameRaw.charAt(0).toUpperCase() + monthNameRaw.slice(1);
               }
 
-              const totalIncome = await calculateTotalIncome(
-                userIdString,
-                month,
-                category
-              );
-
-              if (totalIncome === 0) {
-                let zeroMessage;
-                if (category) {
-                  const catFormatted =
-                    category.charAt(0).toUpperCase() + category.slice(1);
-                  zeroMessage = `🤷‍♀️ Nenhuma receita registrada na categoria _*${catFormatted}*_ no mês de _*${monthName}*_.`;
-                } else {
-                  zeroMessage = `🤷‍♀️ Nenhuma receita registrada no mês de _*${monthName}*_.`;
-                }
-                twiml.message(zeroMessage);
-              } else {
-                let responseMessage;
-                if (category) {
-                  const catFormatted =
-                    category.charAt(0).toUpperCase() + category.slice(1);
-                  responseMessage = `📈 *Receita total* de _*${catFormatted}*_ no mês de _*${monthName}*_: \nR$ ${totalIncome.toFixed(
-                    2
-                  )}`;
-                } else {
-                  responseMessage = `📈 *Receita total* no mês de _*${monthName}*_: \nR$ ${totalIncome.toFixed(
-                    2
-                  )}`;
-                }
-
+              if (category) {
+                const totalIncomeCategory = await calculateTotalIncome(userIdString, month, category);
+                const catFormatted = category.charAt(0).toUpperCase() + category.slice(1);
+                
+                let responseMessage = `📈 *Receita total* de _*${catFormatted}*_ no mês de _*${monthName}*_: \nR$ ${totalIncomeCategory.toFixed(2)}`;
                 responseMessage += `.\n\nDigite "detalhes" para ver a lista de itens.`;
-                conversationState[userIdString] = {
-                  type: "income",
-                  category,
-                  month,
-                  monthName,
-                };
+                
+                conversationState[userIdString] = { type: "income", category, month, monthName };
+                twiml.message(responseMessage);
+                break;
+              }
+              
+              const summary = await getMonthlySummary(userIdString, month);
+
+              if (summary.income === 0 && summary.expenses === 0) {
+                twiml.message(`🤷‍♀️ Nenhuma movimentação (receitas ou despesas) registrada no mês de _*${monthName}*_.`);
+              } else {
+                let responseMessage = `🧾 *Resumo Financeiro de ${monthName}*\n\n`;
+                responseMessage += `📈 *Receita Total:* R$ ${summary.income.toFixed(2)}\n`;
+                responseMessage += `📉 *Despesa Total:* R$ ${summary.expenses.toFixed(2)}\n\n`;
+                
+                const balancePrefix = summary.balance >= 0 ? "💰 *Saldo do Mês:*" : "⚠️ *Saldo do Mês:*";
+                responseMessage += `${balancePrefix} *R$ ${summary.balance.toFixed(2)}*`;
+
+                responseMessage += `\n\nDigite "detalhes" para ver a lista de receitas.`;
+                conversationState[userIdString] = { type: "income", month, monthName }; 
                 twiml.message(responseMessage);
               }
-
               break;
             }
             case "detalhes": {
