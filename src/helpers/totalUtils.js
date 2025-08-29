@@ -141,7 +141,9 @@ export async function calculateTotalExpenses(
 
 export async function getExpensesReport(userId, days) {
   const startDate = new Date();
-  startDate.setDate(startDate.getDate() - (days + 1));
+  startDate.setDate(startDate.getDate() - (days - 1));
+
+  startDate.setHours(0, 0, 0, 0);
 
   return Transaction.aggregate([
     {
@@ -165,7 +167,6 @@ export async function getExpensesReport(userId, days) {
       },
     },
     { $sort: { _id: 1 } },
-    { $limit: days },
   ]);
 }
 
