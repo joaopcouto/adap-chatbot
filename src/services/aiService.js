@@ -250,39 +250,56 @@ export async function interpretMessageWithAI(message, currentDate) {
   }
 }
 
-export async function interpretReceiptWithAI(imageUrl) {
-  const prompt = `Você é um especialista em analisar IMAGENS de notas fiscais brasileiras. Sua tarefa é olhar para a imagem, entender o layout e extrair um resumo JSON preciso da compra.
+export async function interpretDocumentWithAI(imageUrl) {
+  const prompt = `Você é um especialista em analisar IMAGENS de documentos financeiros brasileiros. Sua primeira tarefa é CLASSIFICAR o tipo de documento. Depois, extrair os dados relevantes.
 
-  **LÓGICA DE PRIORIDADE PARA O VALOR TOTAL (A REGRA MAIS IMPORTANTE):**
-  A nota pode ter múltiplos valores totais. Sua prioridade MÁXIMA é encontrar o valor final que o cliente realmente pagou. Siga esta ordem estrita:
-  1.  **Prioridade 1:** Procure pela linha que contém "Valor a Pagar" ou "Total a Pagar". Este é quase sempre o valor correto.
-  2.  **Prioridade 2:** Se a Prioridade 1 não existir, procure pelo valor numérico que está na mesma linha da forma de pagamento (ex: "Cartão de Débito", "Dinheiro").
-  3.  **Prioridade 3 (Último Recurso):** Somente se nenhuma das anteriores for encontrada, use o valor da linha "Valor Total" ou "Total R$".
+  **1. CLASSIFICAÇÃO:**
+  Determine o tipo do documento. Os tipos possíveis são:
+  - 'store_receipt': Nota fiscal de compra (supermercado, loja, restaurante, etc.).
+  - 'utility_bill': Conta de consumo com data de vencimento (luz, água, internet, boleto em geral).
+  - 'pix_receipt': Comprovante de transação PIX.
+  - 'unknown': Qualquer outro tipo de documento que não se encaixe nos anteriores.
 
-  **OUTRAS INSTRUÇÕES:**
+  **2. EXTRAÇÃO DE DADOS (Baseado no tipo):**
+
+  **Se o tipo for 'store_receipt':**
+  - **totalAmount**: Extraia o valor final pago. Use a lógica de prioridade: "Valor a Pagar" > Valor na linha da "Forma de Pagamento" > "Valor Total".
   - **storeName**: Extraia o nome do estabelecimento.
-  - **purchaseDate**: Encontre a data da compra e retorne no formato YYYY-MM-DD.
-  - **category**: Sugira uma categoria baseada no tipo de loja (Supermercado -> "Alimentação", Posto de Gasolina -> "Transporte", Farmácia -> "Saúde", Restaurante -> "Alimentação", Lojas -> "Compras", etc.).
-  - **Conversão de Moeda:** Converta a VÍRGULA decimal brasileira para PONTO (ex: "445,79" se torna 445.79).
+  - **purchaseDate**: Extraia a data da compra.
+  - **category**: Sugira uma categoria apropriada (ex: Supermercado -> "Alimentação").
 
-  Responda APENAS com o objeto JSON final.
+  **Se o tipo for 'utility_bill':**
+  - **totalAmount**: Extraia o valor principal da conta (Total a Pagar).
+  - **provider**: Extraia o nome da empresa fornecedora (ex: "ENEL", "CLARO S.A.").
+  - **dueDate**: Extraia a DATA DE VENCIMENTO.
+  - **category**: A categoria deve ser "Gastos Fixos".
 
-  Exemplo de Resposta:
+  **Se o tipo for 'pix_receipt':**
+  - **totalAmount**: Extraia o valor do PIX.
+  - **counterpartName**: Extraia o nome do beneficiário (para quem foi pago) ou do pagador (de quem recebeu). É o nome da "outra ponta" da transação.
+  - **transactionDate**: Extraia a data em que o PIX foi efetivado.
+  - **category**: A categoria deve ser "Transferência".
+
+  **REGRAS GERAIS:**
+  - Todas as datas devem ser retornadas no formato YYYY-MM-DD.
+  - Converta sempre a VÍRGULA decimal brasileira para PONTO (ex: "445,79" se torna 445.79).
+  - Responda APENAS com o objeto JSON final, sem explicações.
+
+  **Formato de Resposta:**
   {
-    "isReceipt": true,
+    "documentType": "store_receipt" | "utility_bill" | "pix_receipt" | "unknown",
     "data": {
-      "totalAmount": 445.79,
-      "storeName": "ATACADÃO S.A.",
-      "category": "Alimentação",
-      "purchaseDate": "2022-06-02"
+      "totalAmount": 123.45,
+      // Campos específicos de cada tipo
+      "storeName": "NOME DA LOJA", "purchaseDate": "2025-08-23", "category": "Alimentação",
+      "provider": "NOME DA EMPRESA", "dueDate": "2025-09-10",
+      "counterpartName": "NOME DO BENEFICIÁRIO/PAGADOR", "transactionDate": "2025-08-22"
     }
   }`;
 
   try {
     const imageResponse = await axios({
-      method: 'get',
-      url: imageUrl,
-      responseType: 'arraybuffer',
+      method: 'get', url: imageUrl, responseType: 'arraybuffer',
       auth: { username: process.env.TWILIO_ACCOUNT_SID, password: process.env.TWILIO_AUTH_TOKEN },
     });
 
@@ -290,7 +307,7 @@ export async function interpretReceiptWithAI(imageUrl) {
     const mimeType = imageResponse.headers['content-type'];
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o", 
+      model: "gpt-4o",
       messages: [
         {
           role: "user",
@@ -307,12 +324,12 @@ export async function interpretReceiptWithAI(imageUrl) {
     });
 
     const cleanResponse = response.choices[0].message.content.replace(/```json\n|```/g, "").trim();
-    devLog("--- Resposta da IA (Análise Visual Direta) ---\n", cleanResponse, "\n-------------------------------------");
+    devLog("--- Resposta da IA (Análise de Documento) ---\n", cleanResponse, "\n-------------------------------------");
     const result = JSON.parse(cleanResponse);
     return result;
 
   } catch (error) {
-    console.error("Erro no processo de interpretação de nota fiscal:", error);
-    return { isReceipt: false, data: null };
+    console.error("Erro no processo de interpretação de documento:", error);
+    return { documentType: 'unknown', data: null };
   }
 }
