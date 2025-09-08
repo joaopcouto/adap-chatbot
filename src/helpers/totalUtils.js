@@ -484,7 +484,7 @@ export async function getIncomeByCategoryReport(userId, days) {
 
 export async function getTotalReminders(userId) {
   const allFutureRemindersArray = await Reminder.find({
-    userId: new mongoose.Types.ObjectId(userId),
+    userId: userId,
     date: { $gte: new Date() },
   }).sort({ date: "asc" });
 

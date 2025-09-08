@@ -1287,7 +1287,7 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               }
 
               const newReminder = new Reminder({
-                userId: userObjectId,
+                userId: userIdString,
                 userPhoneNumber: req.body.From.replace("whatsapp:", ""),
                 description: description,
                 date: dateToSave,
@@ -1301,7 +1301,7 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
             case "delete_reminder": {
               const { messageId } = interpretation.data;
               const reminder = await Reminder.findOneAndDelete({
-                userId: userObjectId,
+                userId: userIdString,
                 messageId,
               });
               if (reminder) {
@@ -1310,7 +1310,7 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               break;
             }
             case "get_total_reminders": {
-              const totalReminders = await getTotalReminders(userObjectId);
+              const totalReminders = await getTotalReminders(userIdString);
               sendTotalRemindersMessage(twiml, totalReminders);
               break;
             }
