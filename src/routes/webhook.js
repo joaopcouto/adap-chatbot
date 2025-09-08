@@ -5,11 +5,15 @@ import {
   sendTextMessageTEST,
 } from "../services/twilioService.js";
 import { devLog } from "../helpers/logger.js";
+import { generateCorrelationId } from "../helpers/logger.js";
 import User from "../models/User.js";
 import { fromZonedTime } from "date-fns-tz";
 import { TIMEZONE } from "../utils/dateUtils.js";
 
-import { interpretMessageWithAI, transcribeAudioWithWhisper } from "../services/aiService.js";
+import {
+  interpretMessageWithAI,
+  transcribeAudioWithWhisper,
+} from "../services/aiService.js";
 import {
   calculateTotalExpenses,
   calculateTotalIncome,
@@ -50,6 +54,8 @@ import { hasAccessToFeature } from "../helpers/userUtils.js";
 import Reminder from "../models/Reminder.js";
 import { fixPhoneNumber } from "../utils/phoneUtils.js";
 import { validateUserAccess } from "../services/userAccessService.js";
+import reminderService from "../services/reminderService.js";
+import googleIntegrationWhatsAppService from "../services/googleIntegrationWhatsAppService.js";
 
 const router = express.Router();
 let conversationState = {};
@@ -57,21 +63,23 @@ let conversationState = {};
 router.post("/", async (req, res) => {
   const twiml = new twilio.twiml.MessagingResponse();
   let userMessage;
-  
+
   // Handle audio messages
   if (req.body.MediaUrl0 && req.body.MediaContentType0.includes("audio")) {
     try {
       userMessage = await transcribeAudioWithWhisper(req.body.MediaUrl0);
     } catch (error) {
       devLog("Erro ao transcrever áudio:", error);
-      twiml.message("❌ Desculpe, não consegui processar seu áudio. Tente enviar uma mensagem de texto.");
+      twiml.message(
+        "❌ Desculpe, não consegui processar seu áudio. Tente enviar uma mensagem de texto."
+      );
       res.writeHead(200, { "Content-Type": "text/xml" });
       return res.end(twiml.toString());
     }
   } else {
     userMessage = req.body.Body;
   }
-  
+
   const userPhoneNumber = fixPhoneNumber(req.body.From);
   let responseHasBeenSent = false;
 
@@ -95,7 +103,6 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
     );
     res.writeHead(200, { "Content-Type": "text/xml" });
     return res.end(twiml.toString());
-    
   } else {
     const userObjectId = user._id;
     const userIdString = user._id.toString();
@@ -801,9 +808,11 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
             }
             case "detalhes": {
               const previousData = conversationState[userIdString];
-              
+
               if (!previousData || !previousData.type) {
-                twiml.message("Para ver os detalhes, primeiro peça um resumo dos seus gastos ou receitas. Por exemplo, envie 'gasto total' ou 'minhas receitas'.");
+                twiml.message(
+                  "Para ver os detalhes, primeiro peça um resumo dos seus gastos ou receitas. Por exemplo, envie 'gasto total' ou 'minhas receitas'."
+                );
                 break;
               }
 
@@ -817,7 +826,7 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                   monthName,
                   category
                 );
-              } else { 
+              } else {
                 result = await getExpenseDetails(
                   userIdString,
                   month,
@@ -831,7 +840,7 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               if (transactionIds && transactionIds.length > 0) {
                 conversationState[userIdString] = {
                   ...previousData,
-                  detailedList: transactionIds
+                  detailedList: transactionIds,
                 };
               } else {
                 delete conversationState[userIdString];
@@ -841,7 +850,7 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                 try {
                   for (const chunk of messages) {
                     await sendTextMessage(req.body.From, chunk);
-                    await new Promise((resolve) => setTimeout(resolve, 500)); 
+                    await new Promise((resolve) => setTimeout(resolve, 500));
                   }
                 } catch (error) {
                   devLog("Erro no loop de envio sequencial:", error);
@@ -859,45 +868,66 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               const { itemNumber } = interpretation.data;
               const state = conversationState[userIdString];
 
-              if (!state || !state.detailedList || state.detailedList.length === 0) {
-                twiml.message("Não encontrei uma lista de itens para apagar. Por favor, gere os 'detalhes' de seus gastos ou receitas primeiro.");
+              if (
+                !state ||
+                !state.detailedList ||
+                state.detailedList.length === 0
+              ) {
+                twiml.message(
+                  "Não encontrei uma lista de itens para apagar. Por favor, gere os 'detalhes' de seus gastos ou receitas primeiro."
+                );
                 break;
               }
 
               const index = itemNumber - 1;
 
               if (index < 0 || index >= state.detailedList.length) {
-                twiml.message(`Número de item inválido. Por favor, escolha um número entre 1 e ${state.detailedList.length}.`);
+                twiml.message(
+                  `Número de item inválido. Por favor, escolha um número entre 1 e ${state.detailedList.length}.`
+                );
                 break;
               }
 
               const transactionIdToDelete = state.detailedList[index];
 
               if (transactionIdToDelete === null) {
-                twiml.message(`🤔 O item número ${itemNumber} já foi apagado nesta sessão.`);
+                twiml.message(
+                  `🤔 O item número ${itemNumber} já foi apagado nesta sessão.`
+                );
                 break;
               }
 
-              const transaction = await Transaction.findById(transactionIdToDelete);
+              const transaction = await Transaction.findById(
+                transactionIdToDelete
+              );
 
               if (!transaction) {
                 conversationState[userIdString].detailedList[index] = null;
-                twiml.message("Ops, este item já foi apagado ou não foi encontrado no banco de dados.");
+                twiml.message(
+                  "Ops, este item já foi apagado ou não foi encontrado no banco de dados."
+                );
                 break;
               }
 
               await Transaction.findByIdAndDelete(transactionIdToDelete);
 
-              const updateField = transaction.type === 'income' ? 'totalIncome' : 'totalSpent';
+              const updateField =
+                transaction.type === "income" ? "totalIncome" : "totalSpent";
               await UserStats.findOneAndUpdate(
                 { userId: userObjectId },
                 { $inc: { [updateField]: -transaction.amount } }
               );
-              
-              twiml.message(`✅ Item "${transaction.description}" no valor de R$ ${transaction.amount.toFixed(2)} foi apagado com sucesso!`);
-              
+
+              twiml.message(
+                `✅ Item "${
+                  transaction.description
+                }" no valor de R$ ${transaction.amount.toFixed(
+                  2
+                )} foi apagado com sucesso!`
+              );
+
               conversationState[userIdString].detailedList[index] = null;
-              
+
               break;
             }
             case "reminder": {
@@ -919,32 +949,248 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                 break;
               }
 
-              const newReminder = new Reminder({
-                userId: userObjectId,
-                userPhoneNumber: req.body.From.replace("whatsapp:", ""),
+              // Use the new ReminderService for creation with Google Calendar integration
+              const reminderData = {
                 description: description,
                 date: dateToSave,
-                messageId: generateId(),
-              });
+              };
 
-              await newReminder.save();
-              await sendReminderMessage(twiml, userMessage, newReminder);
+              const userPhoneNumberClean = req.body.From.replace(
+                "whatsapp:",
+                ""
+              );
+              const correlationId = generateCorrelationId();
+
+              try {
+                const result = await reminderService.createReminder(
+                  reminderData,
+                  userObjectId,
+                  userPhoneNumberClean,
+                  correlationId
+                );
+                await sendReminderMessage(twiml, userMessage, result.reminder);
+              } catch (error) {
+                devLog(
+                  `[Webhook] Error creating reminder for user ${userObjectId} (${correlationId}):`,
+                  error
+                );
+                twiml.message(
+                  "❌ Ocorreu um erro ao criar o lembrete. Tente novamente mais tarde."
+                );
+              }
               break;
             }
             case "delete_reminder": {
               const { messageId } = interpretation.data;
-              const reminder = await Reminder.findOneAndDelete({
-                userId: userObjectId,
-                messageId,
-              });
-              if (reminder) {
-                sendReminderDeletedMessage(twiml, reminder);
+
+              try {
+                const result = await reminderService.deleteReminder(
+                  messageId,
+                  userObjectId
+                );
+                if (result.found) {
+                  sendReminderDeletedMessage(twiml, result.reminder);
+                } else {
+                  twiml.message(
+                    `🚫 Nenhum lembrete encontrado com o ID #_${messageId}_ para exclusão.`
+                  );
+                }
+              } catch (error) {
+                devLog(
+                  `[Webhook] Error deleting reminder ${messageId} for user ${userObjectId}:`,
+                  error
+                );
+                twiml.message(
+                  "❌ Ocorreu um erro ao excluir o lembrete. Tente novamente mais tarde."
+                );
               }
               break;
             }
             case "get_total_reminders": {
               const totalReminders = await getTotalReminders(userObjectId);
               sendTotalRemindersMessage(twiml, totalReminders);
+              break;
+            }
+            case "google_connect": {
+              try {
+                const correlationId = generateCorrelationId();
+                devLog(
+                  `[Webhook] Google connect request for user ${userObjectId} (${correlationId})`
+                );
+
+                // Generate OAuth URL
+                const authResult =
+                  await googleIntegrationWhatsAppService.generateAuthUrl(
+                    userObjectId.toString(),
+                    correlationId
+                  );
+
+                if (authResult.success) {
+                  const connectionMessage =
+                    googleIntegrationWhatsAppService.formatConnectionMessage(
+                      authResult.authUrl
+                    );
+                  twiml.message(connectionMessage);
+                } else {
+                  twiml.message(
+                    "❌ Erro ao gerar link de conexão. Tente novamente mais tarde."
+                  );
+                }
+              } catch (error) {
+                devLog(
+                  `[Webhook] Error generating Google auth URL for user ${userObjectId}:`,
+                  error
+                );
+                twiml.message(
+                  "❌ Erro ao conectar com Google Calendar. Tente novamente mais tarde."
+                );
+              }
+              break;
+            }
+            case "google_disconnect": {
+              try {
+                const correlationId = generateCorrelationId();
+                devLog(
+                  `[Webhook] Google disconnect request for user ${userObjectId} (${correlationId})`
+                );
+
+                const result =
+                  await googleIntegrationWhatsAppService.disconnectGoogle(
+                    userObjectId.toString(),
+                    correlationId
+                  );
+
+                twiml.message(result.message);
+              } catch (error) {
+                devLog(
+                  `[Webhook] Error disconnecting Google for user ${userObjectId}:`,
+                  error
+                );
+                twiml.message(
+                  "❌ Erro ao desconectar Google Calendar. Tente novamente mais tarde."
+                );
+              }
+              break;
+            }
+            case "google_status": {
+              try {
+                const correlationId = generateCorrelationId();
+                devLog(
+                  `[Webhook] Google status request for user ${userObjectId} (${correlationId})`
+                );
+
+                const status =
+                  await googleIntegrationWhatsAppService.getIntegrationStatus(
+                    userObjectId.toString(),
+                    correlationId
+                  );
+
+                const statusMessage =
+                  googleIntegrationWhatsAppService.formatStatusMessage(status);
+                twiml.message(statusMessage);
+              } catch (error) {
+                devLog(
+                  `[Webhook] Error getting Google status for user ${userObjectId}:`,
+                  error
+                );
+                twiml.message(
+                  "❌ Erro ao verificar status do Google Calendar. Tente novamente mais tarde."
+                );
+              }
+              break;
+            }
+            case "google_enable_sync": {
+              try {
+                const correlationId = generateCorrelationId();
+                devLog(
+                  `[Webhook] Google enable sync request for user ${userObjectId} (${correlationId})`
+                );
+
+                const result =
+                  await googleIntegrationWhatsAppService.setCalendarSyncEnabled(
+                    userObjectId.toString(),
+                    true,
+                    correlationId
+                  );
+
+                twiml.message(result.message);
+              } catch (error) {
+                devLog(
+                  `[Webhook] Error enabling Google sync for user ${userObjectId}:`,
+                  error
+                );
+
+                if (error.message.includes("must be connected")) {
+                  twiml.message(
+                    "❌ Você precisa conectar sua conta Google primeiro. Digite 'conectar google calendar' para começar."
+                  );
+                } else {
+                  twiml.message(
+                    "❌ Erro ao ativar sincronização. Tente novamente mais tarde."
+                  );
+                }
+              }
+              break;
+            }
+            case "google_disable_sync": {
+              try {
+                const correlationId = generateCorrelationId();
+                devLog(
+                  `[Webhook] Google disable sync request for user ${userObjectId} (${correlationId})`
+                );
+
+                const result =
+                  await googleIntegrationWhatsAppService.setCalendarSyncEnabled(
+                    userObjectId.toString(),
+                    false,
+                    correlationId
+                  );
+
+                twiml.message(result.message);
+              } catch (error) {
+                devLog(
+                  `[Webhook] Error disabling Google sync for user ${userObjectId}:`,
+                  error
+                );
+
+                if (error.message.includes("must be connected")) {
+                  twiml.message(
+                    "❌ Você precisa conectar sua conta Google primeiro. Digite 'conectar google calendar' para começar."
+                  );
+                } else {
+                  twiml.message(
+                    "❌ Erro ao desativar sincronização. Tente novamente mais tarde."
+                  );
+                }
+              }
+              break;
+            }
+            case "google_debug": {
+              try {
+                const correlationId = generateCorrelationId();
+                devLog(
+                  `[Webhook] Google debug request for user ${userObjectId} (${correlationId})`
+                );
+
+                const diagnostics =
+                  await googleIntegrationWhatsAppService.getDiagnosticInfo(
+                    correlationId
+                  );
+                const diagnosticMessage =
+                  googleIntegrationWhatsAppService.formatDiagnosticMessage(
+                    diagnostics
+                  );
+
+                twiml.message(diagnosticMessage);
+              } catch (error) {
+                devLog(
+                  `[Webhook] Error generating Google diagnostics for user ${userObjectId}:`,
+                  error
+                );
+                twiml.message(
+                  "❌ Erro ao gerar diagnóstico. Tente novamente mais tarde."
+                );
+              }
               break;
             }
             case "financial_help": {

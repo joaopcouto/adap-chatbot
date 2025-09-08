@@ -84,6 +84,13 @@ export async function interpretMessageWithAI(message, currentDate) {
       "reminder" → O usuário pede um lembrete ou notificação sobre um compromisso, evento ou tarefa.
       "delete_reminder" → O usuário pede para excluir um lembrete. Extraia o messageId.
       "get_total_reminders" → O usuário pede todos os lembretes futuros.
+      "google_connect" → O usuário quer conectar sua conta Google para sincronizar lembretes com Google Calendar.
+      "google_disconnect" → O usuário quer desconectar sua conta Google e parar a sincronização.
+      "google_status" → O usuário quer verificar o status da integração com Google Calendar.
+      "google_enable_sync" → O usuário quer habilitar a sincronização de lembretes com Google Calendar.
+      "google_disable_sync" → O usuário quer desabilitar a sincronização de lembretes com Google Calendar.
+      "google_debug" → O usuário quer informações de diagnóstico sobre a configuração Google.
+      "google_test_url" → O usuário quer testar a URL OAuth diretamente.
       "financial_help" → O usuário faz uma pergunta geral relacionada a finanças (ex: investimentos, poupança, estratégias).
       "unknown" → A mensagem não corresponde a nenhuma das intenções acima.
   
@@ -115,7 +122,7 @@ export async function interpretMessageWithAI(message, currentDate) {
        Responda apenas com um objeto JSON válido sem qualquer formatação ou explicação adicional
      - Retorne um objeto JSON com a intenção e dados extraídos. Use este formato:
        {
-         "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "delete_list_item" | "generate_daily_chart" | "generate_category_chart" | "get_total_income" |"get_total" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "financial_help",
+         "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "delete_list_item" | "generate_daily_chart" | "generate_category_chart" | "get_total_income" |"get_total" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "google_connect" | "google_disconnect" | "google_status" | "google_enable_sync" | "google_disable_sync" | "google_debug" | "financial_help",
          "data": {
            "amount": number,
            "description": string,
@@ -216,6 +223,38 @@ export async function interpretMessageWithAI(message, currentDate) {
 
     - Usuário: "Quais são meus lembretes?"
       Resposta: { "intent": "get_total_reminders", "data":{} }
+
+    - Usuário: "Conectar Google Calendar"
+      Resposta: { "intent": "google_connect", "data": {} }
+    - Usuário: "Quero sincronizar com Google"
+      Resposta: { "intent": "google_connect", "data": {} }
+    - Usuário: "Conectar minha conta Google"
+      Resposta: { "intent": "google_connect", "data": {} }
+
+    - Usuário: "Desconectar Google Calendar"
+      Resposta: { "intent": "google_disconnect", "data": {} }
+    - Usuário: "Parar sincronização Google"
+      Resposta: { "intent": "google_disconnect", "data": {} }
+
+    - Usuário: "Status do Google Calendar"
+      Resposta: { "intent": "google_status", "data": {} }
+    - Usuário: "Está conectado com Google?"
+      Resposta: { "intent": "google_status", "data": {} }
+
+    - Usuário: "Habilitar sincronização Google"
+      Resposta: { "intent": "google_enable_sync", "data": {} }
+    - Usuário: "Ativar Google Calendar"
+      Resposta: { "intent": "google_enable_sync", "data": {} }
+
+    - Usuário: "Desabilitar sincronização Google"
+      Resposta: { "intent": "google_disable_sync", "data": {} }
+    - Usuário: "Desativar Google Calendar"
+      Resposta: { "intent": "google_disable_sync", "data": {} }
+
+    - Usuário: "Debug Google Calendar"
+      Resposta: { "intent": "google_debug", "data": {} }
+    - Usuário: "Diagnóstico Google"
+      Resposta: { "intent": "google_debug", "data": {} }
 
     - Usuário: "Devo investir mais em ações ou renda fixa?"
       Resposta: { "intent": "financial_help", "data": {} }
