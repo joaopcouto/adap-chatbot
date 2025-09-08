@@ -5,6 +5,7 @@ import {
   sendTextMessageTEST,
 } from "../services/twilioService.js";
 import { devLog } from "../helpers/logger.js";
+import { generateCorrelationId } from "../helpers/logger.js";
 import User from "../models/User.js";
 import { fromZonedTime } from "date-fns-tz";
 import { TIMEZONE } from "../utils/dateUtils.js";
@@ -57,6 +58,8 @@ import { hasAccessToFeature } from "../helpers/userUtils.js";
 import Reminder from "../models/Reminder.js";
 import { fixPhoneNumber } from "../utils/phoneUtils.js";
 import { validateUserAccess } from "../services/userAccessService.js";
+import reminderService from "../services/reminderService.js";
+import googleIntegrationWhatsAppService from "../services/googleIntegrationWhatsAppService.js";
 
 const router = express.Router();
 let conversationState = {};
@@ -79,6 +82,9 @@ router.post("/", async (req, res) => {
       userMessage = await transcribeAudioWithWhisper(req.body.MediaUrl0);
     } catch (error) {
       devLog("Erro ao transcrever áudio:", error);
+      twiml.message(
+        "❌ Desculpe, não consegui processar seu áudio. Tente enviar uma mensagem de texto."
+      );
       twiml.message(
         "❌ Desculpe, não consegui processar seu áudio. Tente enviar uma mensagem de texto."
       );
@@ -1009,6 +1015,9 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                 twiml.message(
                   "Para ver os detalhes, primeiro peça um resumo dos seus gastos ou receitas. Por exemplo, envie 'gasto total' ou 'minhas receitas'."
                 );
+                twiml.message(
+                  "Para ver os detalhes, primeiro peça um resumo dos seus gastos ou receitas. Por exemplo, envie 'gasto total' ou 'minhas receitas'."
+                );
                 break;
               }
 
@@ -1102,6 +1111,9 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                 twiml.message(
                   "Ops, este item já foi apagado ou não foi encontrado no banco de dados."
                 );
+                twiml.message(
+                  "Ops, este item já foi apagado ou não foi encontrado no banco de dados."
+                );
                 break;
               }
 
@@ -1145,32 +1157,248 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                 break;
               }
 
-              const newReminder = new Reminder({
-                userId: userObjectId,
-                userPhoneNumber: req.body.From.replace("whatsapp:", ""),
+              // Use the new ReminderService for creation with Google Calendar integration
+              const reminderData = {
                 description: description,
                 date: dateToSave,
-                messageId: generateId(),
-              });
+              };
 
-              await newReminder.save();
-              await sendReminderMessage(twiml, userMessage, newReminder);
+              const userPhoneNumberClean = req.body.From.replace(
+                "whatsapp:",
+                ""
+              );
+              const correlationId = generateCorrelationId();
+
+              try {
+                const result = await reminderService.createReminder(
+                  reminderData,
+                  userObjectId,
+                  userPhoneNumberClean,
+                  correlationId
+                );
+                await sendReminderMessage(twiml, userMessage, result.reminder);
+              } catch (error) {
+                devLog(
+                  `[Webhook] Error creating reminder for user ${userObjectId} (${correlationId}):`,
+                  error
+                );
+                twiml.message(
+                  "❌ Ocorreu um erro ao criar o lembrete. Tente novamente mais tarde."
+                );
+              }
               break;
             }
             case "delete_reminder": {
               const { messageId } = interpretation.data;
-              const reminder = await Reminder.findOneAndDelete({
-                userId: userObjectId,
-                messageId,
-              });
-              if (reminder) {
-                sendReminderDeletedMessage(twiml, reminder);
+
+              try {
+                const result = await reminderService.deleteReminder(
+                  messageId,
+                  userObjectId
+                );
+                if (result.found) {
+                  sendReminderDeletedMessage(twiml, result.reminder);
+                } else {
+                  twiml.message(
+                    `🚫 Nenhum lembrete encontrado com o ID #_${messageId}_ para exclusão.`
+                  );
+                }
+              } catch (error) {
+                devLog(
+                  `[Webhook] Error deleting reminder ${messageId} for user ${userObjectId}:`,
+                  error
+                );
+                twiml.message(
+                  "❌ Ocorreu um erro ao excluir o lembrete. Tente novamente mais tarde."
+                );
               }
               break;
             }
             case "get_total_reminders": {
               const totalReminders = await getTotalReminders(userObjectId);
               sendTotalRemindersMessage(twiml, totalReminders);
+              break;
+            }
+            case "google_connect": {
+              try {
+                const correlationId = generateCorrelationId();
+                devLog(
+                  `[Webhook] Google connect request for user ${userObjectId} (${correlationId})`
+                );
+
+                // Generate OAuth URL
+                const authResult =
+                  await googleIntegrationWhatsAppService.generateAuthUrl(
+                    userObjectId.toString(),
+                    correlationId
+                  );
+
+                if (authResult.success) {
+                  const connectionMessage =
+                    googleIntegrationWhatsAppService.formatConnectionMessage(
+                      authResult.authUrl
+                    );
+                  twiml.message(connectionMessage);
+                } else {
+                  twiml.message(
+                    "❌ Erro ao gerar link de conexão. Tente novamente mais tarde."
+                  );
+                }
+              } catch (error) {
+                devLog(
+                  `[Webhook] Error generating Google auth URL for user ${userObjectId}:`,
+                  error
+                );
+                twiml.message(
+                  "❌ Erro ao conectar com Google Calendar. Tente novamente mais tarde."
+                );
+              }
+              break;
+            }
+            case "google_disconnect": {
+              try {
+                const correlationId = generateCorrelationId();
+                devLog(
+                  `[Webhook] Google disconnect request for user ${userObjectId} (${correlationId})`
+                );
+
+                const result =
+                  await googleIntegrationWhatsAppService.disconnectGoogle(
+                    userObjectId.toString(),
+                    correlationId
+                  );
+
+                twiml.message(result.message);
+              } catch (error) {
+                devLog(
+                  `[Webhook] Error disconnecting Google for user ${userObjectId}:`,
+                  error
+                );
+                twiml.message(
+                  "❌ Erro ao desconectar Google Calendar. Tente novamente mais tarde."
+                );
+              }
+              break;
+            }
+            case "google_status": {
+              try {
+                const correlationId = generateCorrelationId();
+                devLog(
+                  `[Webhook] Google status request for user ${userObjectId} (${correlationId})`
+                );
+
+                const status =
+                  await googleIntegrationWhatsAppService.getIntegrationStatus(
+                    userObjectId.toString(),
+                    correlationId
+                  );
+
+                const statusMessage =
+                  googleIntegrationWhatsAppService.formatStatusMessage(status);
+                twiml.message(statusMessage);
+              } catch (error) {
+                devLog(
+                  `[Webhook] Error getting Google status for user ${userObjectId}:`,
+                  error
+                );
+                twiml.message(
+                  "❌ Erro ao verificar status do Google Calendar. Tente novamente mais tarde."
+                );
+              }
+              break;
+            }
+            case "google_enable_sync": {
+              try {
+                const correlationId = generateCorrelationId();
+                devLog(
+                  `[Webhook] Google enable sync request for user ${userObjectId} (${correlationId})`
+                );
+
+                const result =
+                  await googleIntegrationWhatsAppService.setCalendarSyncEnabled(
+                    userObjectId.toString(),
+                    true,
+                    correlationId
+                  );
+
+                twiml.message(result.message);
+              } catch (error) {
+                devLog(
+                  `[Webhook] Error enabling Google sync for user ${userObjectId}:`,
+                  error
+                );
+
+                if (error.message.includes("must be connected")) {
+                  twiml.message(
+                    "❌ Você precisa conectar sua conta Google primeiro. Digite 'conectar google calendar' para começar."
+                  );
+                } else {
+                  twiml.message(
+                    "❌ Erro ao ativar sincronização. Tente novamente mais tarde."
+                  );
+                }
+              }
+              break;
+            }
+            case "google_disable_sync": {
+              try {
+                const correlationId = generateCorrelationId();
+                devLog(
+                  `[Webhook] Google disable sync request for user ${userObjectId} (${correlationId})`
+                );
+
+                const result =
+                  await googleIntegrationWhatsAppService.setCalendarSyncEnabled(
+                    userObjectId.toString(),
+                    false,
+                    correlationId
+                  );
+
+                twiml.message(result.message);
+              } catch (error) {
+                devLog(
+                  `[Webhook] Error disabling Google sync for user ${userObjectId}:`,
+                  error
+                );
+
+                if (error.message.includes("must be connected")) {
+                  twiml.message(
+                    "❌ Você precisa conectar sua conta Google primeiro. Digite 'conectar google calendar' para começar."
+                  );
+                } else {
+                  twiml.message(
+                    "❌ Erro ao desativar sincronização. Tente novamente mais tarde."
+                  );
+                }
+              }
+              break;
+            }
+            case "google_debug": {
+              try {
+                const correlationId = generateCorrelationId();
+                devLog(
+                  `[Webhook] Google debug request for user ${userObjectId} (${correlationId})`
+                );
+
+                const diagnostics =
+                  await googleIntegrationWhatsAppService.getDiagnosticInfo(
+                    correlationId
+                  );
+                const diagnosticMessage =
+                  googleIntegrationWhatsAppService.formatDiagnosticMessage(
+                    diagnostics
+                  );
+
+                twiml.message(diagnosticMessage);
+              } catch (error) {
+                devLog(
+                  `[Webhook] Error generating Google diagnostics for user ${userObjectId}:`,
+                  error
+                );
+                twiml.message(
+                  "❌ Erro ao gerar diagnóstico. Tente novamente mais tarde."
+                );
+              }
               break;
             }
             case "financial_help": {
