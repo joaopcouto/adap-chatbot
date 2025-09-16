@@ -4,12 +4,27 @@ import rateLimit from "express-rate-limit";
 import rateLimitMongo from "rate-limit-mongo";
 import { connectToDatabase } from "./src/config/database.js";
 import webhookRouter from "./src/routes/webhook.js";
+import googleIntegrationRouter from "./src/routes/googleIntegration.js";
+import monitoringRouter from "./src/routes/monitoring.js";
+import configurationRouter from "./src/routes/configuration.js";
 import { startInstallmentReminderJob } from "./src/jobs/installmentReminderJob.js";
-import { startReminderJob } from './src/jobs/reminderJob.js'; 
+import { startReminderJob } from './src/jobs/reminderJob.js';
+import { startSyncRetryJob } from './src/jobs/syncRetryJob.js';
+import { startAlertingJob } from './src/jobs/alertingJob.js'; 
+import { startInactiveUserJob } from './src/jobs/inactiveUserJob.js';
+import { startLowStockAlertJob } from './src/jobs/lowStockAlertJob.js';
 
 const app = express();
+
+// Middleware para contornar o aviso do ngrok
+app.use((req, res, next) => {
+  res.setHeader('ngrok-skip-browser-warning', 'true');
+  next();
+});
+
 app.use("/images", express.static("/tmp"));
 app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
 // Store baseado em Mongo (evita reiniciar contadores ao subir nova instância)
 const mongoStore = new rateLimitMongo({
@@ -37,12 +52,19 @@ const userLimiter = rateLimit({
 });
 
 app.use("/webhook", userLimiter, webhookRouter);
+app.use("/api/google", userLimiter, googleIntegrationRouter);
+app.use("/api/monitoring", userLimiter, monitoringRouter);
+app.use("/api/config", userLimiter, configurationRouter);
 
 connectToDatabase()
   .then(() => {
     console.log("✅ MongoDB conectado");
     startInstallmentReminderJob(); // INICIA O NOVO JOB
     startReminderJob();
+    startSyncRetryJob(); // INICIA O JOB DE RETRY DE SYNC
+    startAlertingJob(); // INICIA O JOB DE ALERTAS
+    startInactiveUserJob(); // INICIA JOG DE USER INATIVO
+    startLowStockAlertJob(); // INICIA JOB DE ESTOQUE BAIXO 
   })
   .catch((err) => console.error("❌ Erro na conexão:", err));
 

@@ -3,6 +3,8 @@ import Category from "../models/Category.js";
 import Reminder from "../models/Reminder.js";
 import { TIMEZONE, formatInBrazilWithTime } from "../utils/dateUtils.js";
 import mongoose from "mongoose";
+import InventoryTemplate from "../models/InventoryTemplate.js";
+import Product from "../models/Product.js"; 
 
 const MESSAGE_LIMIT = 1550;
 
@@ -482,7 +484,7 @@ export async function getIncomeByCategoryReport(userId, days) {
 
 export async function getTotalReminders(userId) {
   const allFutureRemindersArray = await Reminder.find({
-    userId: new mongoose.Types.ObjectId(userId),
+    userId: userId,
     date: { $gte: new Date() },
   }).sort({ date: "asc" });
 
@@ -583,4 +585,66 @@ export async function getActiveInstallments(userId) {
     console.error("Erro ao buscar parcelamentos ativos:", error);
     return [];
   }
+}
+
+export async function getFormattedInventory(userId, templateName) {
+  const template = await InventoryTemplate.findOne({
+    userId: userId,
+    templateName: { $regex: new RegExp(`^${templateName.toLowerCase()}`, "i") }
+  });
+
+  if (!template) {
+    return { messages: [`Não encontrei um estoque chamado *${templateName}*. Para ver seus estoques, diga "listar estoques".`] };
+  }
+
+  const products = await Product.find({
+    userId: userId,
+    templateId: template._id
+  }).sort({ 'attributes.Nome': 1 }); 
+
+  if (products.length === 0) {
+    return { messages: [`Você ainda não tem nenhum item no estoque *${template.templateName}*. Para adicionar, diga "adicionar ${template.templateName}".`] };
+  }
+
+  const header = `📦 *Estoque de ${template.templateName.charAt(0).toUpperCase() + template.templateName.slice(1)}:*\n\n`;
+  let chunks = [];
+  let currentChunk = "";
+
+  products.forEach((product, index) => {
+    const descriptionParts = [];
+    template.fields.forEach(field => {
+      if (product.attributes.has(field)) {
+        descriptionParts.push(product.attributes.get(field));
+      }
+    });
+    const description = descriptionParts.join(" ");
+    
+    const productLine = `🆔 *#${product.customId}* - ${description}\n   - *Quantidade:* ${product.quantity}\n\n`;
+
+    if ( (index === 0 ? header.length : 0) + currentChunk.length + productLine.length > MESSAGE_LIMIT) {
+      chunks.push(currentChunk);
+      currentChunk = productLine;
+    } else {
+      currentChunk += productLine;
+    }
+  });
+
+  chunks.push(currentChunk); 
+
+  const finalMessages = chunks.map((chunk, index) => {
+    if (index === 0) {
+      return header + chunk; 
+    }
+    return chunk;
+  });
+  
+  const footer = `\nPara movimentar o estoque, use o ID. Ex: "vendi 2 #${products[0].customId}"`;
+  
+  if (finalMessages[finalMessages.length-1].length + footer.length <= MESSAGE_LIMIT){
+    finalMessages[finalMessages.length-1] += footer;
+  } else {
+    finalMessages.push(footer);
+  }
+
+  return { messages: finalMessages };
 }
