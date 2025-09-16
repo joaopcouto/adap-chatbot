@@ -13,7 +13,7 @@ import { TIMEZONE } from "../utils/dateUtils.js";
 import {
   interpretMessageWithAI,
   transcribeAudioWithWhisper,
-  interpretDocumentWithAI
+  interpretDocumentWithAI,
 } from "../services/aiService.js";
 import {
   getMonthlySummary,
@@ -27,6 +27,7 @@ import {
   getIncomeDetails,
   getOrCreateCategory,
   getActiveInstallments,
+  getFormattedInventory
 } from "../helpers/totalUtils.js";
 import {
   generateChart,
@@ -54,6 +55,8 @@ import {
   VALID_CATEGORIES,
   VALID_CATEGORIES_INCOME,
 } from "../utils/constants.js";
+import InventoryTemplate from "../models/InventoryTemplate.js";
+import Product from "../models/Product.js";
 import { hasAccessToFeature } from "../helpers/userUtils.js";
 import Reminder from "../models/Reminder.js";
 import { fixPhoneNumber } from "../utils/phoneUtils.js";
@@ -138,191 +141,87 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
         22
       );
 
-      if (isImage) {
-        twiml.message("🔍 Analisando seu documento... Só um instante.");
-        res.writeHead(200, { "Content-Type": "text/xml" });
-        res.end(twiml.toString());
-        responseHasBeenSent = true;
+      if (previousData.awaiting === "template_fields") {
+        const { templateName } = previousData.payload;
+        const fields = userMessage
+          .split(",")
+          .map((f) => f.trim().charAt(0).toUpperCase() + f.trim().slice(1));
 
-        const result = await interpretDocumentWithAI(req.body.MediaUrl0);
-
-        switch (result.documentType) {
-          case "store_receipt": {
-            const { totalAmount, storeName, purchaseDate, category } =
-              result.data;
-            let transactionDate = new Date(`${purchaseDate}T12:00:00`);
-            if (isNaN(transactionDate.getTime())) {
-              transactionDate = new Date();
-            }
-
-            const description = `${storeName} - ${transactionDate.toLocaleDateString(
-              "pt-BR"
-            )}`;
-            const categoryDoc = await getOrCreateCategory(
-              userIdString,
-              category.toLowerCase()
-            );
-            const defaultPaymentMethod = await PaymentMethod.findOne({
-              type: "pix",
-            });
-
-            const newExpense = new Transaction({
-              userId: userIdString,
-              amount: totalAmount,
-              description,
-              categoryId: categoryDoc._id.toString(),
-              type: "expense",
-              date: transactionDate,
-              messageId: generateId(),
-              paymentMethodId: defaultPaymentMethod._id.toString(),
-              status: "completed",
-            });
-            await newExpense.save();
-            await UserStats.findOneAndUpdate(
-              { userId: userObjectId },
-              { $inc: { totalSpent: totalAmount } }
-            );
-
-            await sendTextMessage(
-              req.body.From,
-              `✅ Despesa de *${storeName}* no valor de *R$ ${totalAmount.toFixed(
-                2
-              )}* registrada com sucesso!`
-            );
-            break;
-          }
-
-          case "utility_bill": {
-            const { totalAmount, provider, dueDate } = result.data;
-            const [year, month, day] = dueDate.split("-");
-            const formattedDate = `${day}/${month}/${year}`;
-
-            let confirmationMessage = `🧾 Conta identificada:\n\n`;
-            confirmationMessage += `*Empresa:* ${provider}\n*Valor:* R$ ${totalAmount.toFixed(
-              2
-            )}\n*Vencimento:* ${formattedDate}\n\n`;
-            confirmationMessage +=
-              "Você já pagou esta conta?\n\nResponda com `sim` ou `não`.";
-
-            conversationState[userIdString] = {
-              awaiting: "payment_status_confirmation",
-              payload: result.data,
-            };
-            await sendTextMessage(req.body.From, confirmationMessage);
-            break;
-          }
-
-          case "pix_receipt": {
-            const { totalAmount, counterpartName } = result.data;
-            let pixMessage = `🧾 PIX identificado:\n\n*Valor:* R$ ${totalAmount.toFixed(
-              2
-            )}\n*Para/De:* ${counterpartName}\n\n`;
-            pixMessage +=
-              "Este PIX foi um pagamento que você *FEZ* ou um valor que você *RECEBEU*?\n\nResponda `fiz` ou `recebi`.";
-
-            conversationState[userIdString] = {
-              awaiting: "pix_type_confirmation",
-              payload: result.data,
-            };
-            await sendTextMessage(req.body.From, pixMessage);
-            break;
-          }
-
-          default:
-            await sendTextMessage(
-              req.body.From,
-              "🫤 Desculpe, não consegui identificar um documento financeiro válido nesta imagem. Tente uma foto mais nítida."
-            );
-            break;
-        }
-      } else if (previousData.awaiting === "payment_status_confirmation") {
-        const userInput = userMessage.trim().toLowerCase();
-        if (userInput !== "sim" && userInput !== "não") {
-          twiml.message("Por favor, responda apenas com `sim` ou `não`.");
-        } else {
-          const hasPaid = userInput === "sim";
-          const { totalAmount, provider, dueDate, category } =
-            previousData.payload;
-
-          const status = hasPaid ? "completed" : "pending";
-          const date = hasPaid ? new Date() : new Date(`${dueDate}T12:00:00`);
-          const description = `Conta ${provider}`;
-
-          const categoryDoc = await getOrCreateCategory(
-            userIdString,
-            category.toLowerCase()
+        if (fields.length < 2 || fields.length > 10) {
+          twiml.message(
+            "Por favor, forneça de 2 a 10 campos separados por vírgula."
           );
-          const defaultPaymentMethod = await PaymentMethod.findOne({
-            type: "pix",
-          });
+        } else {
+          conversationState[userIdString] = {
+            awaiting: "template_confirmation",
+            payload: { templateName, fields },
+          };
+          twiml.message(
+            `Ok! Os campos para o estoque *${templateName}* serão: *${fields.join(
+              ", "
+            )}*.\n\nEstá correto? Responda *sim* para salvar.`
+          );
+        }
+      } else if (previousData.awaiting === "template_confirmation") {
+        if (userMessage.trim().toLowerCase() === "sim") {
+          const { templateName, fields } = previousData.payload;
 
-          const newExpense = new Transaction({
+          const newTemplate = new InventoryTemplate({
             userId: userIdString,
-            amount: totalAmount,
-            description,
-            categoryId: categoryDoc._id.toString(),
-            type: "expense",
-            date,
-            status,
-            messageId: generateId(),
-            paymentMethodId: defaultPaymentMethod._id.toString(),
+            templateName: templateName.toLowerCase(),
+            fields: fields,
           });
-          await newExpense.save();
-          await UserStats.findOneAndUpdate(
-            { userId: userObjectId },
-            { $inc: { totalSpent: totalAmount } }
+          await newTemplate.save();
+
+          twiml.message(
+            `✅ Estoque para *${templateName}* criado com sucesso!\n\nPara adicionar seu primeiro item, diga: "adicionar ${templateName}"`
           );
-
-          if (!hasPaid) {
-            const reminderDate = new Date(`${dueDate}T12:00:00Z`);
-            const newReminder = new Reminder({
-              userId: userObjectId,
-              userPhoneNumber: req.body.From.replace("whatsapp:", ""),
-              description: `Pagar conta da ${provider} no valor de R$ ${totalAmount.toFixed(
-                2
-              )}`,
-              date: reminderDate,
-              messageId: generateId(),
-            });
-            await newReminder.save();
-            twiml.message(
-              `✅ Conta da *${provider}* registrada como *pendente* e lembrete criado para o dia do vencimento!`
-            );
-          } else {
-            twiml.message(
-              `✅ Conta da *${provider}* registrada como *paga* com sucesso!`
-            );
-          }
           delete conversationState[userIdString];
-        }
-      } else if (previousData.awaiting === "pix_type_confirmation") {
-        const pixType = userMessage.trim().toLowerCase();
-        if (pixType !== 'fiz' && pixType !== 'recebi') {
-          twiml.message("Por favor, responda apenas com `fiz` ou `recebi`.");
         } else {
-          const { totalAmount, counterpartName, transactionDate, category } = previousData.payload;
-          const type = pixType === 'fiz' ? 'expense' : 'income';
-          let date = new Date(`${transactionDate}T12:00:00`);
-          if (isNaN(date.getTime())) { date = new Date(); }
-          
-          const description = type === 'expense' ? `PIX para ${counterpartName}` : `PIX de ${counterpartName}`;
-          const categoryDoc = await getOrCreateCategory(userIdString, category.toLowerCase());
-          const defaultPaymentMethod = await PaymentMethod.findOne({ type: "pix" });
-          
-          const newTransaction = new Transaction({
-            userId: userIdString, amount: totalAmount, description,
-            categoryId: categoryDoc._id.toString(), type, date,
-            status: 'completed', messageId: generateId(), paymentMethodId: defaultPaymentMethod._id.toString()
-          });
-          await newTransaction.save();
-          
-          const updateField = type === 'expense' ? 'totalSpent' : 'totalIncome';
-          await UserStats.findOneAndUpdate({ userId: userObjectId }, { $inc: { [updateField]: totalAmount } }, { upsert: true });
-
-          twiml.message(`✅ PIX de R$ ${totalAmount.toFixed(2)} (${type === 'expense' ? 'enviado' : 'recebido'}) registrado com sucesso!`);
+          twiml.message("Criação do estoque cancelada.");
           delete conversationState[userIdString];
         }
+      } else if (previousData.awaiting === "product_attributes") {
+        const { template } = previousData.payload;
+        const values = userMessage.split(",").map((v) => v.trim());
 
+        if (values.length !== template.fields.length) {
+          twiml.message(
+            `Ops! Você forneceu ${values.length} valores, mas preciso de ${
+              template.fields.length
+            }. Por favor, envie os valores na ordem correta: *${template.fields.join(
+              ", "
+            )}*`
+          );
+        } else {
+          const attributes = {};
+          template.fields.forEach((field, index) => {
+            attributes[field] = values[index];
+          });
+
+          const productCount = await Product.countDocuments({
+            userId: userIdString,
+          });
+          const customId = `P${(productCount + 1).toString().padStart(4, "0")}`;
+
+          const newProduct = new Product({
+            userId: userIdString,
+            templateId: template._id,
+            customId: customId,
+            attributes: attributes,
+            quantity: 0,
+          });
+          await newProduct.save();
+
+          twiml.message(
+            `✅ Produto *${Object.values(attributes).join(
+              " "
+            )}* (ID: #${customId}) adicionado ao estoque *${
+              template.templateName
+            }* com quantidade 0.\n\nPara dar entrada, diga: "entrada 10 #${customId}"`
+          );
+          delete conversationState[userIdString];
+        }
       } else if (previousData.awaiting === "installment_due_day") {
         const dueDay = parseInt(userMessage.trim(), 10);
 
@@ -416,8 +315,217 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
             delete conversationState[userIdString];
           }
         }
-      } else if (!previousData.awaiting) {
+      } else if (previousData.awaiting === "pix_type_confirmation") {
+        const pixType = userMessage.trim().toLowerCase();
+        if (pixType !== "fiz" && pixType !== "recebi") {
+          twiml.message("Por favor, responda apenas com `fiz` ou `recebi`.");
+        } else {
+          const { totalAmount, counterpartName, transactionDate, category } =
+            previousData.payload;
+          const type = pixType === "fiz" ? "expense" : "income";
+          let date = new Date(`${transactionDate}T12:00:00`);
+          if (isNaN(date.getTime())) {
+            date = new Date();
+          }
+
+          const description =
+            type === "expense"
+              ? `PIX para ${counterpartName}`
+              : `PIX de ${counterpartName}`;
+          const categoryDoc = await getOrCreateCategory(
+            userIdString,
+            category.toLowerCase()
+          );
+          const defaultPaymentMethod = await PaymentMethod.findOne({
+            type: "pix",
+          });
+
+          const newTransaction = new Transaction({
+            userId: userIdString,
+            amount: totalAmount,
+            description,
+            categoryId: categoryDoc._id.toString(),
+            type,
+            date,
+            status: "completed",
+            messageId: generateId(),
+            paymentMethodId: defaultPaymentMethod._id.toString(),
+          });
+          await newTransaction.save();
+
+          const updateField = type === "expense" ? "totalSpent" : "totalIncome";
+          await UserStats.findOneAndUpdate(
+            { userId: userObjectId },
+            { $inc: { [updateField]: totalAmount } },
+            { upsert: true }
+          );
+
+          twiml.message(
+            `✅ PIX de R$ ${totalAmount.toFixed(2)} (${
+              type === "expense" ? "enviado" : "recebido"
+            }) registrado com sucesso!`
+          );
+          delete conversationState[userIdString];
+        }
+      } else if (previousData.awaiting === "payment_status_confirmation") {
+        const userInput = userMessage.trim().toLowerCase();
+        if (userInput !== "sim" && userInput !== "não") {
+          twiml.message("Por favor, responda apenas com `sim` ou `não`.");
+        } else {
+          const hasPaid = userInput === "sim";
+          const { totalAmount, provider, dueDate, category } =
+            previousData.payload;
+
+          const status = hasPaid ? "completed" : "pending";
+          const date = hasPaid ? new Date() : new Date(`${dueDate}T12:00:00`);
+          const description = `Conta ${provider}`;
+
+          const categoryDoc = await getOrCreateCategory(
+            userIdString,
+            category.toLowerCase()
+          );
+          const defaultPaymentMethod = await PaymentMethod.findOne({
+            type: "pix",
+          });
+
+          const newExpense = new Transaction({
+            userId: userIdString,
+            amount: totalAmount,
+            description,
+            categoryId: categoryDoc._id.toString(),
+            type: "expense",
+            date,
+            status,
+            messageId: generateId(),
+            paymentMethodId: defaultPaymentMethod._id.toString(),
+          });
+          await newExpense.save();
+          await UserStats.findOneAndUpdate(
+            { userId: userObjectId },
+            { $inc: { totalSpent: totalAmount } }
+          );
+
+          if (!hasPaid) {
+            const reminderDate = new Date(`${dueDate}T12:00:00Z`);
+            const newReminder = new Reminder({
+              userId: userObjectId,
+              userPhoneNumber: req.body.From.replace("whatsapp:", ""),
+              description: `Pagar conta da ${provider} no valor de R$ ${totalAmount.toFixed(
+                2
+              )}`,
+              date: reminderDate,
+              messageId: generateId(),
+            });
+            await newReminder.save();
+            twiml.message(
+              `✅ Conta da *${provider}* registrada como *pendente* e lembrete criado para o dia do vencimento!`
+            );
+          } else {
+            twiml.message(
+              `✅ Conta da *${provider}* registrada como *paga* com sucesso!`
+            );
+          }
+          delete conversationState[userIdString];
+        }
+      } else {
         try {
+          if (isImage) {
+            twiml.message("🔍 Analisando seu documento... Só um instante.");
+            res.writeHead(200, { "Content-Type": "text/xml" });
+            res.end(twiml.toString());
+            responseHasBeenSent = true;
+
+            const result = await interpretDocumentWithAI(req.body.MediaUrl0);
+
+            switch (result.documentType) {
+              case "store_receipt": {
+                const { totalAmount, storeName, purchaseDate, category } =
+                  result.data;
+                let transactionDate = new Date(`${purchaseDate}T12:00:00`);
+                if (isNaN(transactionDate.getTime())) {
+                  transactionDate = new Date();
+                }
+
+                const description = `${storeName} - ${transactionDate.toLocaleDateString(
+                  "pt-BR"
+                )}`;
+                const categoryDoc = await getOrCreateCategory(
+                  userIdString,
+                  category.toLowerCase()
+                );
+                const defaultPaymentMethod = await PaymentMethod.findOne({
+                  type: "pix",
+                });
+
+                const newExpense = new Transaction({
+                  userId: userIdString,
+                  amount: totalAmount,
+                  description,
+                  categoryId: categoryDoc._id.toString(),
+                  type: "expense",
+                  date: transactionDate,
+                  messageId: generateId(),
+                  paymentMethodId: defaultPaymentMethod._id.toString(),
+                  status: "completed",
+                });
+                await newExpense.save();
+                await UserStats.findOneAndUpdate(
+                  { userId: userObjectId },
+                  { $inc: { totalSpent: totalAmount } }
+                );
+
+                await sendTextMessage(
+                  req.body.From,
+                  `✅ Despesa de *${storeName}* no valor de *R$ ${totalAmount.toFixed(
+                    2
+                  )}* registrada com sucesso!`
+                );
+                break;
+              }
+              case "utility_bill": {
+                const { totalAmount, provider, dueDate } = result.data;
+                const [year, month, day] = dueDate.split("-");
+                const formattedDate = `${day}/${month}/${year}`;
+
+                let confirmationMessage = `🧾 Conta identificada:\n\n`;
+                confirmationMessage += `*Empresa:* ${provider}\n*Valor:* R$ ${totalAmount.toFixed(
+                  2
+                )}\n*Vencimento:* ${formattedDate}\n\n`;
+                confirmationMessage +=
+                  "Você já pagou esta conta?\n\nResponda com `sim` ou `não`.";
+
+                conversationState[userIdString] = {
+                  awaiting: "payment_status_confirmation",
+                  payload: result.data,
+                };
+                await sendTextMessage(req.body.From, confirmationMessage);
+                break;
+              }
+              case "pix_receipt": {
+                const { totalAmount, counterpartName } = result.data;
+                let pixMessage = `🧾 PIX identificado:\n\n*Valor:* R$ ${totalAmount.toFixed(
+                  2
+                )}\n*Para/De:* ${counterpartName}\n\n`;
+                pixMessage +=
+                  "Este PIX foi um pagamento que você *FEZ* ou um valor que você *RECEBEU*?\n\nResponda `fiz` ou `recebi`.";
+
+                conversationState[userIdString] = {
+                  awaiting: "pix_type_confirmation",
+                  payload: result.data,
+                };
+                await sendTextMessage(req.body.From, pixMessage);
+                break;
+              }
+
+              default:
+                await sendTextMessage(
+                  req.body.From,
+                  "🫤 Desculpe, não consegui identificar um documento financeiro válido nesta imagem. Tente uma foto mais nítida."
+                );
+                break;
+            }
+          }
+          if (!isImage) {
           const interpretation = await interpretMessageWithAI(
             userMessage,
             new Date().toISOString()
@@ -972,38 +1080,71 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               if (!month || !monthName) {
                 const now = new Date();
                 const currentYear = now.getFullYear();
-                const currentMonth = String(now.getMonth() + 1).padStart(2, "0");
+                const currentMonth = String(now.getMonth() + 1).padStart(
+                  2,
+                  "0"
+                );
                 month = `${currentYear}-${currentMonth}`;
-                const monthNameRaw = now.toLocaleString("pt-BR", { month: "long" });
-                monthName = monthNameRaw.charAt(0).toUpperCase() + monthNameRaw.slice(1);
+                const monthNameRaw = now.toLocaleString("pt-BR", {
+                  month: "long",
+                });
+                monthName =
+                  monthNameRaw.charAt(0).toUpperCase() + monthNameRaw.slice(1);
               }
 
               if (category) {
-                const totalIncomeCategory = await calculateTotalIncome(userIdString, month, category);
-                const catFormatted = category.charAt(0).toUpperCase() + category.slice(1);
-                
-                let responseMessage = `📈 *Receita total* de _*${catFormatted}*_ no mês de _*${monthName}*_: \nR$ ${totalIncomeCategory.toFixed(2)}`;
+                const totalIncomeCategory = await calculateTotalIncome(
+                  userIdString,
+                  month,
+                  category
+                );
+                const catFormatted =
+                  category.charAt(0).toUpperCase() + category.slice(1);
+
+                let responseMessage = `📈 *Receita total* de _*${catFormatted}*_ no mês de _*${monthName}*_: \nR$ ${totalIncomeCategory.toFixed(
+                  2
+                )}`;
                 responseMessage += `.\n\nDigite "detalhes" para ver a lista de itens.`;
-                
-                conversationState[userIdString] = { type: "income", category, month, monthName };
+
+                conversationState[userIdString] = {
+                  type: "income",
+                  category,
+                  month,
+                  monthName,
+                };
                 twiml.message(responseMessage);
                 break;
               }
-              
+
               const summary = await getMonthlySummary(userIdString, month);
 
               if (summary.income === 0 && summary.expenses === 0) {
-                twiml.message(`🤷‍♀️ Nenhuma movimentação (receitas ou despesas) registrada no mês de _*${monthName}*_.`);
+                twiml.message(
+                  `🤷‍♀️ Nenhuma movimentação (receitas ou despesas) registrada no mês de _*${monthName}*_.`
+                );
               } else {
                 let responseMessage = `🧾 *Resumo Financeiro de ${monthName}*\n\n`;
-                responseMessage += `📈 *Receita Total:* R$ ${summary.income.toFixed(2)}\n`;
-                responseMessage += `📉 *Despesa Total:* R$ ${summary.expenses.toFixed(2)}\n\n`;
-                
-                const balancePrefix = summary.balance >= 0 ? "💰 *Saldo do Mês:*" : "⚠️ *Saldo do Mês:*";
-                responseMessage += `${balancePrefix} *R$ ${summary.balance.toFixed(2)}*`;
+                responseMessage += `📈 *Receita Total:* R$ ${summary.income.toFixed(
+                  2
+                )}\n`;
+                responseMessage += `📉 *Despesa Total:* R$ ${summary.expenses.toFixed(
+                  2
+                )}\n\n`;
+
+                const balancePrefix =
+                  summary.balance >= 0
+                    ? "💰 *Saldo do Mês:*"
+                    : "⚠️ *Saldo do Mês:*";
+                responseMessage += `${balancePrefix} *R$ ${summary.balance.toFixed(
+                  2
+                )}*`;
 
                 responseMessage += `\n\nDigite "detalhes" para ver a lista de receitas.`;
-                conversationState[userIdString] = { type: "income", month, monthName }; 
+                conversationState[userIdString] = {
+                  type: "income",
+                  month,
+                  monthName,
+                };
                 twiml.message(responseMessage);
               }
               break;
@@ -1411,6 +1552,194 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               await sendFinancialHelpMessage(twiml, userMessage);
               break;
             }
+            case "create_inventory_template": {
+              if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
+                twiml.message(
+                  "🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante."
+                );
+                break;
+              }
+
+              const { templateName } = interpretation.data;
+              if (!templateName) {
+                twiml.message(
+                  "Por favor, me diga o nome do estoque que você quer criar. Ex: 'criar estoque de camisetas'"
+                );
+                break;
+              }
+
+              const existing = await InventoryTemplate.findOne({
+                userId: userIdString,
+                templateName: templateName.toLowerCase(),
+              });
+              if (existing) {
+                twiml.message(
+                  `Você já possui um estoque chamado *${templateName}*. Escolha outro nome.`
+                );
+                break;
+              }
+
+              conversationState[userIdString] = {
+                awaiting: "template_fields",
+                payload: { templateName },
+              };
+              twiml.message(
+                `Vamos criar o estoque *${templateName}*! 🎉\n\nQuais informações você quer salvar para cada item? Envie os nomes dos campos separados por vírgula (de 2 a 10).\n\n*Exemplo:* nome, cor, tamanho, preço de custo`
+              );
+              break;
+            }
+            case "add_product_to_inventory": {
+              if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
+                twiml.message(
+                  "🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante."
+                );
+                break;
+              }
+
+              const { templateName } = interpretation.data;
+              if (!templateName) {
+                twiml.message(
+                  "Por favor, especifique em qual estoque você quer adicionar o item. Ex: 'adicionar camiseta'"
+                );
+                break;
+              }
+
+              const template = await InventoryTemplate.findOne({
+                userId: userIdString,
+                templateName: {
+                  $regex: new RegExp(`^${templateName.toLowerCase()}`, "i"),
+                },
+              });
+
+              if (!template) {
+                twiml.message(
+                  `Não encontrei um estoque chamado *${templateName}*. Para ver seus estoques, diga "listar estoques".`
+                );
+                break;
+              }
+
+              conversationState[userIdString] = {
+                awaiting: "product_attributes",
+                payload: { template },
+              };
+
+              twiml.message(
+                `Ok, adicionando um novo item ao estoque *${
+                  template.templateName
+                }*.\n\nPor favor, envie os valores para os seguintes campos, separados por vírgula:\n\n*${template.fields.join(
+                  ", "
+                )}*`
+              );
+              break;
+            }
+            case "list_inventory_templates": {
+              if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
+                twiml.message(
+                  "🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante."
+                );
+                break;
+              }
+
+              const templates = await InventoryTemplate.find({
+                userId: userIdString,
+              });
+
+              if (templates.length === 0) {
+                twiml.message(
+                  "Você ainda não criou nenhum tipo de estoque. Para começar, diga 'criar estoque de [nome]'"
+                );
+              } else {
+                let message = "📦 *Seus Estoques Criados:*\n\n";
+                templates.forEach((t) => {
+                  message += `• *${
+                    t.templateName.charAt(0).toUpperCase() +
+                    t.templateName.slice(1)
+                  }*\n   - Campos: _${t.fields.join(", ")}_\n\n`;
+                });
+                message += `Para adicionar um item, diga "adicionar [nome do estoque]".`;
+                twiml.message(message);
+              }
+              break;
+            }
+            case "view_inventory": {
+              if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
+                twiml.message(
+                  "🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante."
+                );
+                break;
+              }
+              const { templateName } = interpretation.data;
+              if (!templateName) {
+                twiml.message(
+                  "Por favor, especifique qual estoque você quer ver. Ex: 'ver estoque de livros'"
+                );
+                break;
+              }
+
+              const { messages } = await getFormattedInventory(
+                userIdString,
+                templateName
+              );
+
+              const sendSequentially = async () => {
+                for (const chunk of messages) {
+                  await sendTextMessage(req.body.From, chunk);
+                  await new Promise((resolve) => setTimeout(resolve, 500));
+                }
+              };
+              sendSequentially();
+              responseHasBeenSent = true;
+              break;
+            }
+            case "update_inventory_quantity": {
+              if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
+                twiml.message("🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante.");
+                break;
+              }
+              let { quantity, productId } = interpretation.data;
+              if (quantity === undefined || !productId) {
+                twiml.message("Formato incorreto. Use: entrada/saída [quantidade] #[ID]. Ex: *vendi 2 #P0001*");
+                break;
+              }
+              productId = productId.toUpperCase();
+              
+              const product = await Product.findOne({
+                userId: userIdString,
+                customId: productId,
+              });
+
+              if (!product) {
+                twiml.message(`🚫 Não encontrei produto com o ID *#${productId}*.`);
+                break;
+              }
+
+              if (quantity < 0 && product.quantity < Math.abs(quantity)) {
+                  twiml.message(`⚠️ *Operação não permitida!*\n\nVocê tentou dar saída de ${Math.abs(quantity)} unidades, mas só há ${product.quantity} em estoque.`);
+                  break;
+              }
+
+              const updatedProduct = await Product.findOneAndUpdate(
+                { _id: product._id },
+                { $inc: { quantity: quantity } },
+                { new: true }
+              );
+              
+              const movementType = quantity > 0 ? "Entrada" : "Saída";
+              
+              const productName = Object.values(Object.fromEntries(updatedProduct.attributes)).join(" ");
+              
+              let responseMessage = `✅ *${movementType} registrada!*\n\n*Produto:* ${productName} (#${updatedProduct.customId})\n*Estoque Atual:* ${updatedProduct.quantity} unidades.`;
+              twiml.message(responseMessage);
+              
+              if (updatedProduct.quantity <= updatedProduct.minStockLevel) {
+                 setTimeout(() => {
+                    const alertMessage = `⚠️ *Alerta de Estoque Baixo!*\n\nO produto *${productName}* (#${updatedProduct.customId}) atingiu o nível mínimo.\n\n*Quantidade Atual:* ${updatedProduct.quantity}`;
+                    sendTextMessage(req.body.From, alertMessage);
+                 }, 1000);
+              }
+              
+              break;
+            }
             case "greeting": {
               sendGreetingMessage(twiml);
               break;
@@ -1419,12 +1748,11 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               sendHelpMessage(twiml);
               break;
           }
+        }
         } catch (err) {
           devLog("Erro ao interpretar a mensagem:", err);
           sendHelpMessage(twiml);
         }
-      } else {
-        twiml.message("🤔 Não entendi sua resposta. Por favor, tente novamente com as opções fornecidas.");
       }
     }
     if (!responseHasBeenSent) {
@@ -1432,7 +1760,7 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
       res.writeHead(200, { "Content-Type": "text/xml" });
       res.end(twiml.toString());
     }
-  }
+    }
 });
 
 export default router;

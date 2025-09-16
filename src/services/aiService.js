@@ -94,6 +94,11 @@ export async function interpretMessageWithAI(message, currentDate) {
       "google_debug" → O usuário quer informações de diagnóstico sobre a configuração Google.
       "google_test_url" → O usuário quer testar a URL OAuth diretamente.
       "financial_help" → O usuário faz uma pergunta geral relacionada a finanças (ex: investimentos, poupança, estratégias).
+      "create_inventory_template" -> O usuário quer criar um novo tipo de produto para o estoque. Extraia o nome do template.
+      "add_product_to_inventory" -> O usuário quer adicionar um novo item a um estoque existente. Extraia o nome do template.
+      "list_inventory_templates" -> O usuário quer ver todos os tipos de estoque que ele já criou.
+      "update_inventory_quantity" -> O usuário quer registrar uma entrada ou saída de um produto no estoque. Extraia a quantidade e o ID do produto.
+      "view_inventory" -> O usuário quer listar os produtos de um estoque específico. Extraia o nome do template.
       "unknown" → A mensagem não corresponde a nenhuma das intenções acima.
   
   2. Regras de Extração de Dados:
@@ -126,11 +131,14 @@ export async function interpretMessageWithAI(message, currentDate) {
        Responda apenas com um objeto JSON válido sem qualquer formatação ou explicação adicional
      - Retorne um objeto JSON com a intenção e dados extraídos. Use este formato:
        {
-         "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "delete_list_item" | "generate_daily_chart" | "generate_category_chart" | "generate_income_category_chart" | "get_total_income" |"get_total" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "google_connect" | "google_disconnect" | "google_status" | "google_enable_sync" | "google_disable_sync" | "google_debug" | "financial_help",
+         "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "delete_list_item" | "generate_daily_chart" | "generate_category_chart" | "generate_income_category_chart" | "get_total_income" |"get_total" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "google_connect" | "google_disconnect" | "google_status" | "google_enable_sync" | "google_disable_sync" | "google_debug" | "financial_help" | "create_inventory_template" | "add_product_to_inventory" | "list_inventory_templates" | "update_inventory_quantity" | "view_inventory" ,
          "data": {
            "amount": number,
            "description": string,
            "category": string,
+           "templateName": string,
+           "quantity": number,     
+           "productId": string, 
            "installmentsGroupId": string,
            "itemNumber": number,
            "messageId": string,
@@ -263,6 +271,35 @@ export async function interpretMessageWithAI(message, currentDate) {
 
     - Usuário: "Devo investir mais em ações ou renda fixa?"
       Resposta: { "intent": "financial_help", "data": {} }
+
+    - Usuário: "criar estoque de camisetas"
+      Resposta: { "intent": "create_inventory_template", "data": { "templateName": "camisetas" } }
+    - Usuário: "novo estoque para bebidas"
+      Resposta: { "intent": "create_inventory_template", "data": { "templateName": "bebidas" } }
+
+    - Usuário: "adicionar camiseta"
+      Resposta: { "intent": "add_product_to_inventory", "data": { "templateName": "camiseta" } }
+    - Usuário: "quero adicionar uma nova bebida"
+      Resposta: { "intent": "add_product_to_inventory", "data": { "templateName": "bebida" } }
+      
+    - Usuário: "quais estoques eu tenho?"
+      Resposta: { "intent": "list_inventory_templates", "data": {} }
+    - Usuário: "listar estoques"
+      Resposta: { "intent": "list_inventory_templates", "data": {} }
+      
+    - Usuário: "ver estoque de livros"
+      Resposta: { "intent": "view_inventory", "data": { "templateName": "livros" } }
+    - Usuário: "me mostre minhas camisetas em estoque"
+      Resposta: { "intent": "view_inventory", "data": { "templateName": "camisetas" } }
+    
+    - Usuário: "entrada 10 #P0001"
+      Resposta: { "intent": "update_inventory_quantity", "data": { "quantity": 10, "productId": "P0001" } }
+    - Usuário: "saída de 3 #P0002"
+      Resposta: { "intent": "update_inventory_quantity", "data": { "quantity": -3, "productId": "P0002" } }
+    - Usuário: "vendi 1 #p0003"
+      Resposta: { "intent": "update_inventory_quantity", "data": { "quantity": -1, "productId": "p0003" } }
+    - Usuário: "adicionei 50 unidades ao item #P0004"
+      Resposta: { "intent": "update_inventory_quantity", "data": { "quantity": 50, "productId": "P0004" } }
      
   
   Agora, interprete esta mensagem: "${message}"`;
@@ -329,7 +366,6 @@ export async function interpretDocumentWithAI(imageUrl) {
     "documentType": "store_receipt" | "utility_bill" | "pix_receipt" | "unknown",
     "data": {
       "totalAmount": 123.45,
-      // Campos específicos de cada tipo
       "storeName": "NOME DA LOJA", "purchaseDate": "2025-08-23", "category": "Alimentação",
       "provider": "NOME DA EMPRESA", "dueDate": "2025-09-10",
       "counterpartName": "NOME DO BENEFICIÁRIO/PAGADOR", "transactionDate": "2025-08-22"
