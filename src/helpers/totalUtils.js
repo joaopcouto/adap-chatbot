@@ -619,7 +619,7 @@ export async function getFormattedInventory(userId, templateName) {
     });
     const description = descriptionParts.join(" ");
     
-    const productLine = `🆔 *#${product.customId}* - ${description}\n   - *Quantidade:* ${product.quantity}\n\n`;
+    const productLine = `🆔 *#${product.customId}* - ${description}\n   - *Quantidade:* ${product.quantity}\n   - *Alerta em:* ${product.minStockLevel} unidades\n\n`;
 
     if ( (index === 0 ? header.length : 0) + currentChunk.length + productLine.length > MESSAGE_LIMIT) {
       chunks.push(currentChunk);

@@ -1740,6 +1740,42 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               
               break;
             }
+            case "set_inventory_alert": {
+              if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
+                twiml.message("🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante.");
+                break;
+              }
+
+              let { productId, quantity } = interpretation.data;
+
+              if (quantity === undefined || !productId) {
+                twiml.message("Formato incorreto. Use: definir alerta #[ID] para [quantidade]. Ex: *alerta #P0001 para 10*");
+                break;
+              }
+
+              productId = productId.toUpperCase();
+              
+              const product = await Product.findOne({
+                userId: userIdString,
+                customId: productId,
+              });
+
+              if (!product) {
+                twiml.message(`🚫 Não encontrei produto com o ID *#${productId}*.`);
+                break;
+              }
+
+              await Product.updateOne(
+                { _id: product._id },
+                { $set: { minStockLevel: quantity } }
+              );
+
+              const productName = Object.values(Object.fromEntries(product.attributes)).join(" ");
+              
+              twiml.message(`✅ Alerta para o produto *${productName}* (#${productId}) definido para *${quantity} unidades*.`);
+              
+              break;
+            }
             case "greeting": {
               sendGreetingMessage(twiml);
               break;
