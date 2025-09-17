@@ -27,7 +27,7 @@ import {
   getIncomeDetails,
   getOrCreateCategory,
   getActiveInstallments,
-  getFormattedInventory
+  getFormattedInventory,
 } from "../helpers/totalUtils.js";
 import {
   generateChart,
@@ -63,6 +63,7 @@ import { fixPhoneNumber } from "../utils/phoneUtils.js";
 import { validateUserAccess } from "../services/userAccessService.js";
 import reminderService from "../services/reminderService.js";
 import googleIntegrationWhatsAppService from "../services/googleIntegrationWhatsAppService.js";
+import UserActivity from "../models/UserActivity.js";
 
 const router = express.Router();
 let conversationState = {};
@@ -125,6 +126,20 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
     const userObjectId = user._id;
     const userIdString = user._id.toString();
     devLog(`User DB ID: ${userIdString}`);
+
+    await UserActivity.findOneAndUpdate(
+      { userId: userObjectId },
+      {
+        $set: {
+          name: user.name,
+          email: user.email,
+          phoneNumber: user.phoneNumber,
+          lastInteractionAt: new Date(),
+        },
+        $inc: { messageCount: 1 },
+      },
+      { upsert: true }
+    );
 
     const previousData = conversationState[userIdString] || {};
     const userStats = await UserStats.findOne(
@@ -526,1265 +541,1299 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
             }
           }
           if (!isImage) {
-          const interpretation = await interpretMessageWithAI(
-            userMessage,
-            new Date().toISOString()
-          );
-          const userHasFreeCategorization = await hasAccessToFeature(
-            userObjectId,
-            "categories"
-          );
-          devLog("intent:" + interpretation.intent);
+            const interpretation = await interpretMessageWithAI(
+              userMessage,
+              new Date().toISOString()
+            );
+            const userHasFreeCategorization = await hasAccessToFeature(
+              userObjectId,
+              "categories"
+            );
+            devLog("intent:" + interpretation.intent);
 
-          conversationState[userIdString] = {
-            ...previousData,
-            ...interpretation.data,
-          };
+            conversationState[userIdString] = {
+              ...previousData,
+              ...interpretation.data,
+            };
 
-          switch (interpretation.intent) {
-            case "add_installment_expense": {
-              const { totalAmount, description, installments, category } =
-                interpretation.data;
+            switch (interpretation.intent) {
+              case "add_installment_expense": {
+                const { totalAmount, description, installments, category } =
+                  interpretation.data;
 
-              if (!totalAmount || !description || !installments) {
-                twiml.message(
-                  "Para registrar um parcelamento, preciso do valor total, da descrição e do número de parcelas (ex: 3500 ps5 em 10x)."
-                );
-                break;
-              }
-
-              const hasCustomCategoryAccess = await hasAccessToFeature(
-                userObjectId,
-                "categories"
-              );
-
-              let finalCategoryName = category || "Outro";
-              if (
-                category &&
-                !VALID_CATEGORIES.includes(category) &&
-                !hasCustomCategoryAccess
-              ) {
-                twiml.message(
-                  `A categoria "${category}" não existe e você não pode criar novas. Registre sem categoria para usar "Outro", ou use uma categoria padrão.`
-                );
-                break;
-              }
-
-              conversationState[userIdString] = {
-                awaiting: "installment_due_day",
-                payload: {
-                  totalAmount,
-                  description,
-                  installments,
-                  categoryName: finalCategoryName,
-                },
-              };
-              devLog(
-                "Estado de conversação salvo, aguardando dia do vencimento:",
-                conversationState[userIdString]
-              );
-
-              twiml.message(
-                "👍 Entendido! E em qual dia a fatura com esta parcela costuma vencer? (Digite apenas o número do dia, ex: 15)"
-              );
-              break;
-            }
-            case "add_income": {
-              const { amount, description, category } = interpretation.data;
-              devLog(amount, description, category);
-
-              if (amount === null || isNaN(amount) || amount <= 0) {
-                twiml.message(
-                  "🚫 Não consegui identificar um valor válido para a receita. Por favor, tente novamente com um número positivo. Ex: 'Recebi 1000 salário'."
-                );
-                break;
-              }
-
-              let finalCategoryName = category || "outro";
-              if (
-                !VALID_CATEGORIES_INCOME.includes(finalCategoryName) &&
-                !userHasFreeCategorization
-              ) {
-                finalCategoryName = "outro";
-              }
-
-              const categoryDoc = await getOrCreateCategory(
-                userIdString,
-                finalCategoryName
-              );
-
-              const defaultPaymentMethod = await PaymentMethod.findOne({
-                type: "pix",
-              });
-              if (!defaultPaymentMethod) {
-                throw new Error(
-                  "Config Error: Payment method 'pix' not found."
-                );
-              }
-              const newIncome = new Transaction({
-                userId: userIdString,
-                amount,
-                description,
-                categoryId: categoryDoc._id.toString(),
-                type: "income",
-                date: new Date(),
-                messageId: generateId(),
-                paymentMethodId: defaultPaymentMethod._id.toString(),
-                status: "completed",
-              });
-
-              await newIncome.save();
-              sendIncomeAddedMessage(twiml, {
-                ...newIncome.toObject(),
-                category: categoryDoc.name,
-              });
-              await UserStats.findOneAndUpdate(
-                { userId: userObjectId },
-                { $inc: { totalIncome: amount } },
-                { upsert: true }
-              );
-
-              break;
-            }
-            case "add_expense": {
-              const { amount, description, category } = interpretation.data;
-              devLog(amount, description, category);
-
-              if (amount === null || isNaN(amount) || amount <= 0) {
-                twiml.message(
-                  "🚫 Não consegui identificar um valor válido para a despesa. Por favor, tente novamente com um número positivo. Ex: '15 uber'."
-                );
-                break;
-              }
-
-              let finalCategoryName = category || "outro";
-              if (
-                !VALID_CATEGORIES.includes(finalCategoryName) &&
-                !userHasFreeCategorization
-              ) {
-                finalCategoryName = "outro";
-              }
-
-              const categoryDoc = await getOrCreateCategory(
-                userIdString,
-                finalCategoryName
-              );
-
-              const defaultPaymentMethod = await PaymentMethod.findOne({
-                type: "pix",
-              });
-              if (!defaultPaymentMethod) {
-                throw new Error(
-                  "Config Error: Payment method 'pix' not found."
-                );
-              }
-
-              const newExpense = new Transaction({
-                userId: userIdString,
-                amount,
-                description,
-                categoryId: categoryDoc._id.toString(),
-                type: "expense",
-                date: new Date(),
-                messageId: generateId(),
-                paymentMethodId: defaultPaymentMethod._id.toString(),
-                status: "completed",
-              });
-
-              await newExpense.save();
-              devLog("Salvando nova despesa:", newExpense);
-              sendExpenseAddedMessage(twiml, {
-                ...newExpense.toObject(),
-                category: categoryDoc.name,
-              });
-              await UserStats.findOneAndUpdate(
-                { userId: userObjectId },
-                { $inc: { totalSpent: amount } },
-                { upsert: true }
-              );
-
-              break;
-            }
-            case "add_transaction_new_category": {
-              const {
-                amount: newAmount,
-                description: newDescription,
-                category: newCategory,
-                type: newType,
-              } = interpretation.data;
-              devLog(
-                `Nova transação com categoria custom: ${newAmount}, ${newDescription}, ${newCategory}, ${newType}`
-              );
-
-              if (newAmount === null || isNaN(newAmount) || newAmount <= 0) {
-                twiml.message(
-                  "🚫 Não consegui identificar um valor válido. Por favor, tente novamente com um número positivo."
-                );
-                break;
-              }
-
-              if (!userHasFreeCategorization) {
-                twiml.message(
-                  "🚫 Este recurso está disponível como um complemento pago.\n\n" +
-                    "🤖 Com ele, você poderá criar novas categorias personalizadas!\n\n" +
-                    'Por exemplo, criar a categoria "Transporte" para registrar gastos com Uber e gasolina, ou "Fast-food" para acompanhar o quanto está indo para aquele lanche que você merece... 🍔\n\n' +
-                    'Você também pode criar uma categoria como "Filho" para controlar os gastos com seu pequeno! 👶\n\n' +
-                    "📌 Acesse o link para testar agora mesmo: https://pay.hotmart.com/O99171246D?bid=1746998583184\n\n" +
-                    "Caso prefira, pode usar uma das 5 categorias grátis:\n" +
-                    "- gastos fixos\n" +
-                    "- lazer\n" +
-                    "- investimento\n" +
-                    "- conhecimento\n" +
-                    "- doação\n\n" +
-                    "✅ E agora também é possível registrar receitas!\n" +
-                    'Basta adicionar "Recebi" antes do valor.\n\n' +
-                    "É muito simples:\n\n" +
-                    "- Para despesa:\n" +
-                    "(Valor) (Onde) em (Categoria)\n" +
-                    "Exemplo:\n" +
-                    "25 mercado em gastos fixos\n\n" +
-                    "- Para receita:\n" +
-                    "Recebi (Valor) (De onde) em (Categoria)\n" +
-                    "Exemplo:\n" +
-                    "Recebi 1500 salário em investimento\n\n" +
-                    "Assim, você terá controle total sobre entradas e saídas de dinheiro!"
-                );
-                break;
-              }
-
-              if (!newCategory || !newType) {
-                twiml.message(
-                  "🚫 Não consegui identificar a categoria ou o tipo (receita/despesa). Tente novamente."
-                );
-                break;
-              }
-
-              const categoryDoc = await getOrCreateCategory(
-                userIdString,
-                newCategory
-              );
-
-              const defaultPaymentMethod = await PaymentMethod.findOne({
-                type: "pix",
-              });
-              if (!defaultPaymentMethod) {
-                throw new Error(
-                  "Config Error: Payment method 'pix' not found."
-                );
-              }
-
-              const newTransaction = new Transaction({
-                userId: userIdString,
-                amount: newAmount,
-                description: newDescription,
-                categoryId: categoryDoc._id.toString(),
-                type: newType,
-                date: new Date(),
-                messageId: generateId(),
-                paymentMethodId: defaultPaymentMethod._id.toString(),
-                status: "completed",
-              });
-
-              await newTransaction.save();
-              devLog(`Nova transação (${newType}) salva:`, newTransaction);
-
-              if (newType === "income") {
-                sendIncomeAddedMessage(twiml, {
-                  ...newTransaction.toObject(),
-                  category: categoryDoc.name,
-                });
-                await UserStats.findOneAndUpdate(
-                  { userId: userObjectId },
-                  { $inc: { totalIncome: newAmount } },
-                  { upsert: true }
-                );
-              } else {
-                sendExpenseAddedMessage(twiml, {
-                  ...newTransaction.toObject(),
-                  category: categoryDoc.name,
-                });
-                await UserStats.findOneAndUpdate(
-                  { userId: userObjectId },
-                  { $inc: { totalSpent: newAmount } },
-                  { upsert: true }
-                );
-              }
-
-              break;
-            }
-            case "get_active_installments": {
-              const installments = await getActiveInstallments(userIdString);
-
-              if (installments.length === 0) {
-                twiml.message(
-                  "Você não possui compras parceladas ativas no momento. ✨"
-                );
-                break;
-              }
-
-              let responseMessage = "🛍️ *Suas compras parceladas ativas:*\n\n";
-
-              installments.forEach((item) => {
-                responseMessage +=
-                  `*Item:* ${item.description}\n` +
-                  `*Valor:* ${
-                    item.totalInstallments
-                  }x de R$ ${item.installmentAmount.toFixed(2)}\n` +
-                  `*Restam:* ${item.pendingCount} parcelas\n` +
-                  `*ID para excluir:* \`#${item.groupId}\`\n\n`;
-              });
-
-              responseMessage += `Para cancelar uma compra, envie "excluir parcelamento #ID".`;
-
-              twiml.message(responseMessage);
-              break;
-            }
-            case "delete_installment_group": {
-              let { installmentsGroupId } = interpretation.data;
-              if (!installmentsGroupId) {
-                twiml.message(
-                  "Por favor, informe o ID do parcelamento que deseja excluir (ex: excluir parcelamento #ID)."
-                );
-                break;
-              }
-
-              installmentsGroupId = installmentsGroupId.trim();
-
-              try {
-                const transactions = await Transaction.find({
-                  userId: userIdString,
-                  installmentsGroupId: installmentsGroupId,
-                });
-
-                if (transactions.length === 0) {
+                if (!totalAmount || !description || !installments) {
                   twiml.message(
-                    `🚫 Nenhum parcelamento encontrado com o ID _${installmentsGroupId}_.`
+                    "Para registrar um parcelamento, preciso do valor total, da descrição e do número de parcelas (ex: 3500 ps5 em 10x)."
                   );
                   break;
                 }
 
-                const description = transactions[0].description.split(" - ")[0];
-
-                const deleteResult = await Transaction.deleteMany({
-                  userId: userIdString,
-                  installmentsGroupId: installmentsGroupId,
-                });
-
-                const totalAmountReverted = transactions.reduce(
-                  (sum, t) => sum + t.amount,
-                  0
-                );
-                await UserStats.findOneAndUpdate(
-                  { userId: userObjectId },
-                  { $inc: { totalSpent: -totalAmountReverted } }
+                const hasCustomCategoryAccess = await hasAccessToFeature(
+                  userObjectId,
+                  "categories"
                 );
 
-                twiml.message(
-                  `🗑️ O parcelamento de *${description}* (${deleteResult.deletedCount} parcelas) foi excluído com sucesso.`
-                );
-                devLog(
-                  `Excluídas ${deleteResult.deletedCount} transações para o grupo ${installmentsGroupId}.`
-                );
-              } catch (error) {
-                devLog("Erro ao excluir grupo de parcelas:", error);
-                twiml.message(
-                  "❌ Ocorreu um erro ao tentar excluir o parcelamento. Tente novamente."
-                );
-              }
-              break;
-            }
-            case "delete_transaction": {
-              const { messageId } = interpretation.data;
-              const transaction = await Transaction.findOne({
-                userId: userObjectId,
-                messageId,
-              });
-              if (!transaction) {
-                twiml.message(
-                  `🚫 Nenhuma transação encontrada com o ID #_${messageId}_ para exclusão.`
-                );
-                break;
-              }
-
-              if (transaction.installmentsGroupId) {
-                twiml.message(
-                  `🚫 A transação #_${messageId}_ faz parte de um parcelamento. Para removê-la, você precisa excluir o parcelamento inteiro.\n\n` +
-                    `Use o comando: *excluir parcelamento* #${transaction.installmentsGroupId}`
-                );
-                break;
-              }
-
-              const category = await Category.findById(transaction.categoryId);
-              await Transaction.findOneAndDelete({
-                userId: userObjectId,
-                messageId,
-              });
-
-              if (transaction.type === "income") {
-                await UserStats.findOneAndUpdate(
-                  { userId: userObjectId },
-                  { $inc: { totalIncome: -transaction.amount } }
-                );
-                sendIncomeDeletedMessage(twiml, {
-                  ...transaction.toObject(),
-                  category: category.name,
-                });
-              } else {
-                await UserStats.findOneAndUpdate(
-                  { userId: userObjectId },
-                  { $inc: { totalSpent: -transaction.amount } }
-                );
-
-                const isCustomCategory =
-                  !VALID_CATEGORIES.includes(category.name) &&
-                  !VALID_CATEGORIES_INCOME.includes(category.name);
-                if (isCustomCategory) {
-                  const count = await Transaction.countDocuments({
-                    userId: userObjectId,
-                    categoryId: category._id.toString(),
-                  });
-                  if (count === 0) {
-                    await Category.findByIdAndDelete(category._id);
-                  }
+                let finalCategoryName = category || "Outro";
+                if (
+                  category &&
+                  !VALID_CATEGORIES.includes(category) &&
+                  !hasCustomCategoryAccess
+                ) {
+                  twiml.message(
+                    `A categoria "${category}" não existe e você não pode criar novas. Registre sem categoria para usar "Outro", ou use uma categoria padrão.`
+                  );
+                  break;
                 }
-                sendExpenseDeletedMessage(twiml, {
-                  ...transaction.toObject(),
-                  category: category.name,
-                });
-              }
-              break;
-            }
-            case "generate_daily_chart": {
-              const { days = 7 } = interpretation.data;
-              const daysToRequest = parseInt(days, 10);
-              const reportData = await getExpensesReport(
-                userIdString,
-                daysToRequest
-              );
-              if (reportData.length === 0) {
-                twiml.message(
-                  `📉 Não há registros de gastos nos últimos ${daysToRequest} dias.`
+
+                conversationState[userIdString] = {
+                  awaiting: "installment_due_day",
+                  payload: {
+                    totalAmount,
+                    description,
+                    installments,
+                    categoryName: finalCategoryName,
+                  },
+                };
+                devLog(
+                  "Estado de conversação salvo, aguardando dia do vencimento:",
+                  conversationState[userIdString]
                 );
-              } else {
-                const imageUrl = await generateChart(
-                  reportData,
-                  userObjectId.toString(),
+
+                twiml.message(
+                  "👍 Entendido! E em qual dia a fatura com esta parcela costuma vencer? (Digite apenas o número do dia, ex: 15)"
+                );
+                break;
+              }
+              case "add_income": {
+                const { amount, description, category } = interpretation.data;
+                devLog(amount, description, category);
+
+                if (amount === null || isNaN(amount) || amount <= 0) {
+                  twiml.message(
+                    "🚫 Não consegui identificar um valor válido para a receita. Por favor, tente novamente com um número positivo. Ex: 'Recebi 1000 salário'."
+                  );
+                  break;
+                }
+
+                let finalCategoryName = category || "outro";
+                if (
+                  !VALID_CATEGORIES_INCOME.includes(finalCategoryName) &&
+                  !userHasFreeCategorization
+                ) {
+                  finalCategoryName = "outro";
+                }
+
+                const categoryDoc = await getOrCreateCategory(
+                  userIdString,
+                  finalCategoryName
+                );
+
+                const defaultPaymentMethod = await PaymentMethod.findOne({
+                  type: "pix",
+                });
+                if (!defaultPaymentMethod) {
+                  throw new Error(
+                    "Config Error: Payment method 'pix' not found."
+                  );
+                }
+                const newIncome = new Transaction({
+                  userId: userIdString,
+                  amount,
+                  description,
+                  categoryId: categoryDoc._id.toString(),
+                  type: "income",
+                  date: new Date(),
+                  messageId: generateId(),
+                  paymentMethodId: defaultPaymentMethod._id.toString(),
+                  status: "completed",
+                });
+
+                await newIncome.save();
+                sendIncomeAddedMessage(twiml, {
+                  ...newIncome.toObject(),
+                  category: categoryDoc.name,
+                });
+                await UserStats.findOneAndUpdate(
+                  { userId: userObjectId },
+                  { $inc: { totalIncome: amount } },
+                  { upsert: true }
+                );
+
+                break;
+              }
+              case "add_expense": {
+                const { amount, description, category } = interpretation.data;
+                devLog(amount, description, category);
+
+                if (amount === null || isNaN(amount) || amount <= 0) {
+                  twiml.message(
+                    "🚫 Não consegui identificar um valor válido para a despesa. Por favor, tente novamente com um número positivo. Ex: '15 uber'."
+                  );
+                  break;
+                }
+
+                let finalCategoryName = category || "outro";
+                if (
+                  !VALID_CATEGORIES.includes(finalCategoryName) &&
+                  !userHasFreeCategorization
+                ) {
+                  finalCategoryName = "outro";
+                }
+
+                const categoryDoc = await getOrCreateCategory(
+                  userIdString,
+                  finalCategoryName
+                );
+
+                const defaultPaymentMethod = await PaymentMethod.findOne({
+                  type: "pix",
+                });
+                if (!defaultPaymentMethod) {
+                  throw new Error(
+                    "Config Error: Payment method 'pix' not found."
+                  );
+                }
+
+                const newExpense = new Transaction({
+                  userId: userIdString,
+                  amount,
+                  description,
+                  categoryId: categoryDoc._id.toString(),
+                  type: "expense",
+                  date: new Date(),
+                  messageId: generateId(),
+                  paymentMethodId: defaultPaymentMethod._id.toString(),
+                  status: "completed",
+                });
+
+                await newExpense.save();
+                devLog("Salvando nova despesa:", newExpense);
+                sendExpenseAddedMessage(twiml, {
+                  ...newExpense.toObject(),
+                  category: categoryDoc.name,
+                });
+                await UserStats.findOneAndUpdate(
+                  { userId: userObjectId },
+                  { $inc: { totalSpent: amount } },
+                  { upsert: true }
+                );
+
+                break;
+              }
+              case "add_transaction_new_category": {
+                const {
+                  amount: newAmount,
+                  description: newDescription,
+                  category: newCategory,
+                  type: newType,
+                } = interpretation.data;
+                devLog(
+                  `Nova transação com categoria custom: ${newAmount}, ${newDescription}, ${newCategory}, ${newType}`
+                );
+
+                if (newAmount === null || isNaN(newAmount) || newAmount <= 0) {
+                  twiml.message(
+                    "🚫 Não consegui identificar um valor válido. Por favor, tente novamente com um número positivo."
+                  );
+                  break;
+                }
+
+                if (!userHasFreeCategorization) {
+                  twiml.message(
+                    "🚫 Este recurso está disponível como um complemento pago.\n\n" +
+                      "🤖 Com ele, você poderá criar novas categorias personalizadas!\n\n" +
+                      'Por exemplo, criar a categoria "Transporte" para registrar gastos com Uber e gasolina, ou "Fast-food" para acompanhar o quanto está indo para aquele lanche que você merece... 🍔\n\n' +
+                      'Você também pode criar uma categoria como "Filho" para controlar os gastos com seu pequeno! 👶\n\n' +
+                      "📌 Acesse o link para testar agora mesmo: https://pay.hotmart.com/O99171246D?bid=1746998583184\n\n" +
+                      "Caso prefira, pode usar uma das 5 categorias grátis:\n" +
+                      "- gastos fixos\n" +
+                      "- lazer\n" +
+                      "- investimento\n" +
+                      "- conhecimento\n" +
+                      "- doação\n\n" +
+                      "✅ E agora também é possível registrar receitas!\n" +
+                      'Basta adicionar "Recebi" antes do valor.\n\n' +
+                      "É muito simples:\n\n" +
+                      "- Para despesa:\n" +
+                      "(Valor) (Onde) em (Categoria)\n" +
+                      "Exemplo:\n" +
+                      "25 mercado em gastos fixos\n\n" +
+                      "- Para receita:\n" +
+                      "Recebi (Valor) (De onde) em (Categoria)\n" +
+                      "Exemplo:\n" +
+                      "Recebi 1500 salário em investimento\n\n" +
+                      "Assim, você terá controle total sobre entradas e saídas de dinheiro!"
+                  );
+                  break;
+                }
+
+                if (!newCategory || !newType) {
+                  twiml.message(
+                    "🚫 Não consegui identificar a categoria ou o tipo (receita/despesa). Tente novamente."
+                  );
+                  break;
+                }
+
+                const categoryDoc = await getOrCreateCategory(
+                  userIdString,
+                  newCategory
+                );
+
+                const defaultPaymentMethod = await PaymentMethod.findOne({
+                  type: "pix",
+                });
+                if (!defaultPaymentMethod) {
+                  throw new Error(
+                    "Config Error: Payment method 'pix' not found."
+                  );
+                }
+
+                const newTransaction = new Transaction({
+                  userId: userIdString,
+                  amount: newAmount,
+                  description: newDescription,
+                  categoryId: categoryDoc._id.toString(),
+                  type: newType,
+                  date: new Date(),
+                  messageId: generateId(),
+                  paymentMethodId: defaultPaymentMethod._id.toString(),
+                  status: "completed",
+                });
+
+                await newTransaction.save();
+                devLog(`Nova transação (${newType}) salva:`, newTransaction);
+
+                if (newType === "income") {
+                  sendIncomeAddedMessage(twiml, {
+                    ...newTransaction.toObject(),
+                    category: categoryDoc.name,
+                  });
+                  await UserStats.findOneAndUpdate(
+                    { userId: userObjectId },
+                    { $inc: { totalIncome: newAmount } },
+                    { upsert: true }
+                  );
+                } else {
+                  sendExpenseAddedMessage(twiml, {
+                    ...newTransaction.toObject(),
+                    category: categoryDoc.name,
+                  });
+                  await UserStats.findOneAndUpdate(
+                    { userId: userObjectId },
+                    { $inc: { totalSpent: newAmount } },
+                    { upsert: true }
+                  );
+                }
+
+                break;
+              }
+              case "get_active_installments": {
+                const installments = await getActiveInstallments(userIdString);
+
+                if (installments.length === 0) {
+                  twiml.message(
+                    "Você não possui compras parceladas ativas no momento. ✨"
+                  );
+                  break;
+                }
+
+                let responseMessage =
+                  "🛍️ *Suas compras parceladas ativas:*\n\n";
+
+                installments.forEach((item) => {
+                  responseMessage +=
+                    `*Item:* ${item.description}\n` +
+                    `*Valor:* ${
+                      item.totalInstallments
+                    }x de R$ ${item.installmentAmount.toFixed(2)}\n` +
+                    `*Restam:* ${item.pendingCount} parcelas\n` +
+                    `*ID para excluir:* \`#${item.groupId}\`\n\n`;
+                });
+
+                responseMessage += `Para cancelar uma compra, envie "excluir parcelamento #ID".`;
+
+                twiml.message(responseMessage);
+                break;
+              }
+              case "delete_installment_group": {
+                let { installmentsGroupId } = interpretation.data;
+                if (!installmentsGroupId) {
+                  twiml.message(
+                    "Por favor, informe o ID do parcelamento que deseja excluir (ex: excluir parcelamento #ID)."
+                  );
+                  break;
+                }
+
+                installmentsGroupId = installmentsGroupId.trim();
+
+                try {
+                  const transactions = await Transaction.find({
+                    userId: userIdString,
+                    installmentsGroupId: installmentsGroupId,
+                  });
+
+                  if (transactions.length === 0) {
+                    twiml.message(
+                      `🚫 Nenhum parcelamento encontrado com o ID _${installmentsGroupId}_.`
+                    );
+                    break;
+                  }
+
+                  const description =
+                    transactions[0].description.split(" - ")[0];
+
+                  const deleteResult = await Transaction.deleteMany({
+                    userId: userIdString,
+                    installmentsGroupId: installmentsGroupId,
+                  });
+
+                  const totalAmountReverted = transactions.reduce(
+                    (sum, t) => sum + t.amount,
+                    0
+                  );
+                  await UserStats.findOneAndUpdate(
+                    { userId: userObjectId },
+                    { $inc: { totalSpent: -totalAmountReverted } }
+                  );
+
+                  twiml.message(
+                    `🗑️ O parcelamento de *${description}* (${deleteResult.deletedCount} parcelas) foi excluído com sucesso.`
+                  );
+                  devLog(
+                    `Excluídas ${deleteResult.deletedCount} transações para o grupo ${installmentsGroupId}.`
+                  );
+                } catch (error) {
+                  devLog("Erro ao excluir grupo de parcelas:", error);
+                  twiml.message(
+                    "❌ Ocorreu um erro ao tentar excluir o parcelamento. Tente novamente."
+                  );
+                }
+                break;
+              }
+              case "delete_transaction": {
+                const { messageId } = interpretation.data;
+                const transaction = await Transaction.findOne({
+                  userId: userObjectId,
+                  messageId,
+                });
+                if (!transaction) {
+                  twiml.message(
+                    `🚫 Nenhuma transação encontrada com o ID #_${messageId}_ para exclusão.`
+                  );
+                  break;
+                }
+
+                if (transaction.installmentsGroupId) {
+                  twiml.message(
+                    `🚫 A transação #_${messageId}_ faz parte de um parcelamento. Para removê-la, você precisa excluir o parcelamento inteiro.\n\n` +
+                      `Use o comando: *excluir parcelamento* #${transaction.installmentsGroupId}`
+                  );
+                  break;
+                }
+
+                const category = await Category.findById(
+                  transaction.categoryId
+                );
+                await Transaction.findOneAndDelete({
+                  userId: userObjectId,
+                  messageId,
+                });
+
+                if (transaction.type === "income") {
+                  await UserStats.findOneAndUpdate(
+                    { userId: userObjectId },
+                    { $inc: { totalIncome: -transaction.amount } }
+                  );
+                  sendIncomeDeletedMessage(twiml, {
+                    ...transaction.toObject(),
+                    category: category.name,
+                  });
+                } else {
+                  await UserStats.findOneAndUpdate(
+                    { userId: userObjectId },
+                    { $inc: { totalSpent: -transaction.amount } }
+                  );
+
+                  const isCustomCategory =
+                    !VALID_CATEGORIES.includes(category.name) &&
+                    !VALID_CATEGORIES_INCOME.includes(category.name);
+                  if (isCustomCategory) {
+                    const count = await Transaction.countDocuments({
+                      userId: userObjectId,
+                      categoryId: category._id.toString(),
+                    });
+                    if (count === 0) {
+                      await Category.findByIdAndDelete(category._id);
+                    }
+                  }
+                  sendExpenseDeletedMessage(twiml, {
+                    ...transaction.toObject(),
+                    category: category.name,
+                  });
+                }
+                break;
+              }
+              case "generate_daily_chart": {
+                const { days = 7 } = interpretation.data;
+                const daysToRequest = parseInt(days, 10);
+                const reportData = await getExpensesReport(
+                  userIdString,
                   daysToRequest
                 );
-                twiml.message().media(imageUrl);
-              }
-              break;
-            }
-            case "generate_category_chart": {
-              const { days = 30 } = interpretation.data;
-              const categoryReport = await getCategoryReport(
-                userIdString,
-                days
-              );
-              if (categoryReport.length === 0) {
-                twiml.message(
-                  `📊 Não há registros de gastos nos últimos ${days} dias para gerar um relatório por categoria.`
-                );
-              } else {
-                const imageUrl = await generateCategoryChart(
-                  categoryReport,
-                  userObjectId.toString()
-                );
-                twiml.message().media(imageUrl);
-              }
-              break;
-            }
-            case "generate_income_category_chart": {
-              const { days = 30 } = interpretation.data;
-              const incomeReport = await getIncomeByCategoryReport(
-                userIdString,
-                days
-              );
-
-              if (incomeReport.length === 0) {
-                twiml.message(
-                  `📈 Você não tem receitas registradas nos últimos ${days} dias para gerar um relatório.`
-                );
-              } else {
-                const imageUrl = await generateIncomeChart(
-                  incomeReport,
-                  userObjectId.toString()
-                );
-                twiml.message().media(imageUrl);
-              }
-              break;
-            }
-            case "get_total": {
-              let { category, month, monthName } = interpretation.data;
-
-              if (!month || !monthName) {
-                const now = new Date();
-                const currentYear = now.getFullYear();
-                const currentMonth = String(now.getMonth() + 1).padStart(
-                  2,
-                  "0"
-                );
-                month = `${currentYear}-${currentMonth}`;
-                const monthNameRaw = now.toLocaleString("pt-BR", {
-                  month: "long",
-                });
-                monthName =
-                  monthNameRaw.charAt(0).toUpperCase() + monthNameRaw.slice(1);
-              }
-
-              const total = await calculateTotalExpenses(
-                userIdString,
-                category,
-                month
-              );
-
-              if (total === 0) {
-                let zeroMessage;
-                if (category) {
-                  const catFormatted =
-                    category.charAt(0).toUpperCase() + category.slice(1);
-                  zeroMessage = `🎉 Você não tem gastos na categoria _*${catFormatted}*_ no mês de _*${monthName}*_.`;
+                if (reportData.length === 0) {
+                  twiml.message(
+                    `📉 Não há registros de gastos nos últimos ${daysToRequest} dias.`
+                  );
                 } else {
-                  zeroMessage = `🎉 Você não tem gastos registrados no mês de _*${monthName}*_.`;
+                  const imageUrl = await generateChart(
+                    reportData,
+                    userObjectId.toString(),
+                    daysToRequest
+                  );
+                  twiml.message().media(imageUrl);
                 }
-                twiml.message(zeroMessage);
-              } else {
-                let responseMessage;
-                if (category) {
-                  const catFormatted =
-                    category.charAt(0).toUpperCase() + category.slice(1);
-                  responseMessage = `📉 *Gasto total* em _*${catFormatted}*_ no mês de _*${monthName}*_: \nR$ ${total.toFixed(
-                    2
-                  )}`;
-                } else {
-                  responseMessage = `📉 *Gasto total* no mês de _*${monthName}*_: \nR$ ${total.toFixed(
-                    2
-                  )}`;
-                }
-
-                responseMessage += `.\n\nDigite "detalhes" para ver a lista de itens.`;
-                conversationState[userIdString] = {
-                  type: "expense",
-                  category,
-                  month,
-                  monthName,
-                };
-                twiml.message(responseMessage);
-              }
-
-              break;
-            }
-            case "get_total_income": {
-              let { category, month, monthName } = interpretation.data;
-
-              if (!month || !monthName) {
-                const now = new Date();
-                const currentYear = now.getFullYear();
-                const currentMonth = String(now.getMonth() + 1).padStart(
-                  2,
-                  "0"
-                );
-                month = `${currentYear}-${currentMonth}`;
-                const monthNameRaw = now.toLocaleString("pt-BR", {
-                  month: "long",
-                });
-                monthName =
-                  monthNameRaw.charAt(0).toUpperCase() + monthNameRaw.slice(1);
-              }
-
-              if (category) {
-                const totalIncomeCategory = await calculateTotalIncome(
-                  userIdString,
-                  month,
-                  category
-                );
-                const catFormatted =
-                  category.charAt(0).toUpperCase() + category.slice(1);
-
-                let responseMessage = `📈 *Receita total* de _*${catFormatted}*_ no mês de _*${monthName}*_: \nR$ ${totalIncomeCategory.toFixed(
-                  2
-                )}`;
-                responseMessage += `.\n\nDigite "detalhes" para ver a lista de itens.`;
-
-                conversationState[userIdString] = {
-                  type: "income",
-                  category,
-                  month,
-                  monthName,
-                };
-                twiml.message(responseMessage);
                 break;
               }
-
-              const summary = await getMonthlySummary(userIdString, month);
-
-              if (summary.income === 0 && summary.expenses === 0) {
-                twiml.message(
-                  `🤷‍♀️ Nenhuma movimentação (receitas ou despesas) registrada no mês de _*${monthName}*_.`
+              case "generate_category_chart": {
+                const { days = 30 } = interpretation.data;
+                const categoryReport = await getCategoryReport(
+                  userIdString,
+                  days
                 );
-              } else {
-                let responseMessage = `🧾 *Resumo Financeiro de ${monthName}*\n\n`;
-                responseMessage += `📈 *Receita Total:* R$ ${summary.income.toFixed(
-                  2
-                )}\n`;
-                responseMessage += `📉 *Despesa Total:* R$ ${summary.expenses.toFixed(
-                  2
-                )}\n\n`;
-
-                const balancePrefix =
-                  summary.balance >= 0
-                    ? "💰 *Saldo do Mês:*"
-                    : "⚠️ *Saldo do Mês:*";
-                responseMessage += `${balancePrefix} *R$ ${summary.balance.toFixed(
-                  2
-                )}*`;
-
-                responseMessage += `\n\nDigite "detalhes" para ver a lista de receitas.`;
-                conversationState[userIdString] = {
-                  type: "income",
-                  month,
-                  monthName,
-                };
-                twiml.message(responseMessage);
-              }
-              break;
-            }
-            case "detalhes": {
-              const previousData = conversationState[userIdString];
-
-              if (!previousData || !previousData.type) {
-                twiml.message(
-                  "Para ver os detalhes, primeiro peça um resumo dos seus gastos ou receitas. Por exemplo, envie 'gasto total' ou 'minhas receitas'."
-                );
-                twiml.message(
-                  "Para ver os detalhes, primeiro peça um resumo dos seus gastos ou receitas. Por exemplo, envie 'gasto total' ou 'minhas receitas'."
-                );
+                if (categoryReport.length === 0) {
+                  twiml.message(
+                    `📊 Não há registros de gastos nos últimos ${days} dias para gerar um relatório por categoria.`
+                  );
+                } else {
+                  const imageUrl = await generateCategoryChart(
+                    categoryReport,
+                    userObjectId.toString()
+                  );
+                  twiml.message().media(imageUrl);
+                }
                 break;
               }
-
-              const { type, category, month, monthName } = previousData;
-
-              let result;
-              if (type === "income") {
-                result = await getIncomeDetails(
+              case "generate_income_category_chart": {
+                const { days = 30 } = interpretation.data;
+                const incomeReport = await getIncomeByCategoryReport(
                   userIdString,
-                  month,
-                  monthName,
-                  category
+                  days
                 );
-              } else {
-                result = await getExpenseDetails(
-                  userIdString,
-                  month,
-                  monthName,
-                  category
-                );
+
+                if (incomeReport.length === 0) {
+                  twiml.message(
+                    `📈 Você não tem receitas registradas nos últimos ${days} dias para gerar um relatório.`
+                  );
+                } else {
+                  const imageUrl = await generateIncomeChart(
+                    incomeReport,
+                    userObjectId.toString()
+                  );
+                  twiml.message().media(imageUrl);
+                }
+                break;
               }
+              case "get_total": {
+                let { category, month, monthName } = interpretation.data;
 
-              const { messages, transactionIds } = result;
+                if (!month || !monthName) {
+                  const now = new Date();
+                  const currentYear = now.getFullYear();
+                  const currentMonth = String(now.getMonth() + 1).padStart(
+                    2,
+                    "0"
+                  );
+                  month = `${currentYear}-${currentMonth}`;
+                  const monthNameRaw = now.toLocaleString("pt-BR", {
+                    month: "long",
+                  });
+                  monthName =
+                    monthNameRaw.charAt(0).toUpperCase() +
+                    monthNameRaw.slice(1);
+                }
 
-              if (transactionIds && transactionIds.length > 0) {
-                conversationState[userIdString] = {
-                  ...previousData,
-                  detailedList: transactionIds,
+                const total = await calculateTotalExpenses(
+                  userIdString,
+                  category,
+                  month
+                );
+
+                if (total === 0) {
+                  let zeroMessage;
+                  if (category) {
+                    const catFormatted =
+                      category.charAt(0).toUpperCase() + category.slice(1);
+                    zeroMessage = `🎉 Você não tem gastos na categoria _*${catFormatted}*_ no mês de _*${monthName}*_.`;
+                  } else {
+                    zeroMessage = `🎉 Você não tem gastos registrados no mês de _*${monthName}*_.`;
+                  }
+                  twiml.message(zeroMessage);
+                } else {
+                  let responseMessage;
+                  if (category) {
+                    const catFormatted =
+                      category.charAt(0).toUpperCase() + category.slice(1);
+                    responseMessage = `📉 *Gasto total* em _*${catFormatted}*_ no mês de _*${monthName}*_: \nR$ ${total.toFixed(
+                      2
+                    )}`;
+                  } else {
+                    responseMessage = `📉 *Gasto total* no mês de _*${monthName}*_: \nR$ ${total.toFixed(
+                      2
+                    )}`;
+                  }
+
+                  responseMessage += `.\n\nDigite "detalhes" para ver a lista de itens.`;
+                  conversationState[userIdString] = {
+                    type: "expense",
+                    category,
+                    month,
+                    monthName,
+                  };
+                  twiml.message(responseMessage);
+                }
+
+                break;
+              }
+              case "get_total_income": {
+                let { category, month, monthName } = interpretation.data;
+
+                if (!month || !monthName) {
+                  const now = new Date();
+                  const currentYear = now.getFullYear();
+                  const currentMonth = String(now.getMonth() + 1).padStart(
+                    2,
+                    "0"
+                  );
+                  month = `${currentYear}-${currentMonth}`;
+                  const monthNameRaw = now.toLocaleString("pt-BR", {
+                    month: "long",
+                  });
+                  monthName =
+                    monthNameRaw.charAt(0).toUpperCase() +
+                    monthNameRaw.slice(1);
+                }
+
+                if (category) {
+                  const totalIncomeCategory = await calculateTotalIncome(
+                    userIdString,
+                    month,
+                    category
+                  );
+                  const catFormatted =
+                    category.charAt(0).toUpperCase() + category.slice(1);
+
+                  let responseMessage = `📈 *Receita total* de _*${catFormatted}*_ no mês de _*${monthName}*_: \nR$ ${totalIncomeCategory.toFixed(
+                    2
+                  )}`;
+                  responseMessage += `.\n\nDigite "detalhes" para ver a lista de itens.`;
+
+                  conversationState[userIdString] = {
+                    type: "income",
+                    category,
+                    month,
+                    monthName,
+                  };
+                  twiml.message(responseMessage);
+                  break;
+                }
+
+                const summary = await getMonthlySummary(userIdString, month);
+
+                if (summary.income === 0 && summary.expenses === 0) {
+                  twiml.message(
+                    `🤷‍♀️ Nenhuma movimentação (receitas ou despesas) registrada no mês de _*${monthName}*_.`
+                  );
+                } else {
+                  let responseMessage = `🧾 *Resumo Financeiro de ${monthName}*\n\n`;
+                  responseMessage += `📈 *Receita Total:* R$ ${summary.income.toFixed(
+                    2
+                  )}\n`;
+                  responseMessage += `📉 *Despesa Total:* R$ ${summary.expenses.toFixed(
+                    2
+                  )}\n\n`;
+
+                  const balancePrefix =
+                    summary.balance >= 0
+                      ? "💰 *Saldo do Mês:*"
+                      : "⚠️ *Saldo do Mês:*";
+                  responseMessage += `${balancePrefix} *R$ ${summary.balance.toFixed(
+                    2
+                  )}*`;
+
+                  responseMessage += `\n\nDigite "detalhes" para ver a lista de receitas.`;
+                  conversationState[userIdString] = {
+                    type: "income",
+                    month,
+                    monthName,
+                  };
+                  twiml.message(responseMessage);
+                }
+                break;
+              }
+              case "detalhes": {
+                const previousData = conversationState[userIdString];
+
+                if (!previousData || !previousData.type) {
+                  twiml.message(
+                    "Para ver os detalhes, primeiro peça um resumo dos seus gastos ou receitas. Por exemplo, envie 'gasto total' ou 'minhas receitas'."
+                  );
+                  twiml.message(
+                    "Para ver os detalhes, primeiro peça um resumo dos seus gastos ou receitas. Por exemplo, envie 'gasto total' ou 'minhas receitas'."
+                  );
+                  break;
+                }
+
+                const { type, category, month, monthName } = previousData;
+
+                let result;
+                if (type === "income") {
+                  result = await getIncomeDetails(
+                    userIdString,
+                    month,
+                    monthName,
+                    category
+                  );
+                } else {
+                  result = await getExpenseDetails(
+                    userIdString,
+                    month,
+                    monthName,
+                    category
+                  );
+                }
+
+                const { messages, transactionIds } = result;
+
+                if (transactionIds && transactionIds.length > 0) {
+                  conversationState[userIdString] = {
+                    ...previousData,
+                    detailedList: transactionIds,
+                  };
+                } else {
+                  delete conversationState[userIdString];
+                }
+
+                const sendSequentially = async () => {
+                  try {
+                    for (const chunk of messages) {
+                      await sendTextMessage(req.body.From, chunk);
+                      await new Promise((resolve) => setTimeout(resolve, 500));
+                    }
+                  } catch (error) {
+                    devLog("Erro no loop de envio sequencial:", error);
+                  }
                 };
-              } else {
-                delete conversationState[userIdString];
-              }
+                sendSequentially();
 
-              const sendSequentially = async () => {
+                res.writeHead(200, { "Content-Type": "text/xml" });
+                res.end(new twilio.twiml.MessagingResponse().toString());
+                responseHasBeenSent = true;
+
+                break;
+              }
+              case "delete_list_item": {
+                const { itemNumber } = interpretation.data;
+                const state = conversationState[userIdString];
+
+                if (
+                  !state ||
+                  !state.detailedList ||
+                  state.detailedList.length === 0
+                ) {
+                  twiml.message(
+                    "Não encontrei uma lista de itens para apagar. Por favor, gere os 'detalhes' de seus gastos ou receitas primeiro."
+                  );
+                  break;
+                }
+
+                const index = itemNumber - 1;
+
+                if (index < 0 || index >= state.detailedList.length) {
+                  twiml.message(
+                    `Número de item inválido. Por favor, escolha um número entre 1 e ${state.detailedList.length}.`
+                  );
+                  break;
+                }
+
+                const transactionIdToDelete = state.detailedList[index];
+
+                if (transactionIdToDelete === null) {
+                  twiml.message(
+                    `🤔 O item número ${itemNumber} já foi apagado nesta sessão.`
+                  );
+                  break;
+                }
+
+                const transaction = await Transaction.findById(
+                  transactionIdToDelete
+                );
+
+                if (!transaction) {
+                  conversationState[userIdString].detailedList[index] = null;
+                  twiml.message(
+                    "Ops, este item já foi apagado ou não foi encontrado no banco de dados."
+                  );
+                  twiml.message(
+                    "Ops, este item já foi apagado ou não foi encontrado no banco de dados."
+                  );
+                  break;
+                }
+
+                await Transaction.findByIdAndDelete(transactionIdToDelete);
+
+                const updateField =
+                  transaction.type === "income" ? "totalIncome" : "totalSpent";
+                await UserStats.findOneAndUpdate(
+                  { userId: userObjectId },
+                  { $inc: { [updateField]: -transaction.amount } }
+                );
+
+                twiml.message(
+                  `✅ Item "${
+                    transaction.description
+                  }" no valor de R$ ${transaction.amount.toFixed(
+                    2
+                  )} foi apagado com sucesso!`
+                );
+
+                conversationState[userIdString].detailedList[index] = null;
+
+                break;
+              }
+              case "reminder": {
+                const { description, date } = interpretation.data;
+                if (!date) {
+                  twiml.message(
+                    "⏰ Por favor, forneça uma data e hora futuras válidas para o lembrete. Ex: 'Lembrar de ligar para o dentista amanhã às 14h'."
+                  );
+                  break;
+                }
+
+                const localDateString = date.slice(0, 19);
+                const dateToSave = fromZonedTime(localDateString, TIMEZONE);
+
+                if (!(dateToSave > new Date())) {
+                  twiml.message(
+                    "⏰ Ops, essa data já passou! Por favor, forneça uma data e hora futuras."
+                  );
+                  break;
+                }
+
+                // Use the new ReminderService for creation with Google Calendar integration
+                const reminderData = {
+                  description: description,
+                  date: dateToSave,
+                };
+
+                const userPhoneNumberClean = req.body.From.replace(
+                  "whatsapp:",
+                  ""
+                );
+                const correlationId = generateCorrelationId();
+
                 try {
+                  const result = await reminderService.createReminder(
+                    reminderData,
+                    userIdString,
+                    userPhoneNumberClean,
+                    correlationId
+                  );
+                  await sendReminderMessage(
+                    twiml,
+                    userMessage,
+                    result.reminder
+                  );
+                } catch (error) {
+                  devLog(
+                    `[Webhook] Error creating reminder for user ${userIdString} (${correlationId}):`,
+                    error
+                  );
+                  twiml.message(
+                    "❌ Ocorreu um erro ao criar o lembrete. Tente novamente mais tarde."
+                  );
+                }
+                break;
+              }
+              case "delete_reminder": {
+                const { messageId } = interpretation.data;
+
+                try {
+                  const result = await reminderService.deleteReminder(
+                    messageId,
+                    userIdString
+                  );
+                  if (result.found) {
+                    sendReminderDeletedMessage(twiml, result.reminder);
+                  } else {
+                    twiml.message(
+                      `🚫 Nenhum lembrete encontrado com o ID #_${messageId}_ para exclusão.`
+                    );
+                  }
+                } catch (error) {
+                  devLog(
+                    `[Webhook] Error deleting reminder ${messageId} for user ${userIdString}:`,
+                    error
+                  );
+                  twiml.message(
+                    "❌ Ocorreu um erro ao excluir o lembrete. Tente novamente mais tarde."
+                  );
+                }
+                break;
+              }
+              case "get_total_reminders": {
+                const totalReminders = await getTotalReminders(userIdString);
+                sendTotalRemindersMessage(twiml, totalReminders);
+                break;
+              }
+              case "google_connect": {
+                try {
+                  const correlationId = generateCorrelationId();
+                  devLog(
+                    `[Webhook] Google connect request for user ${userObjectId} (${correlationId})`
+                  );
+
+                  // Generate OAuth URL
+                  const authResult =
+                    await googleIntegrationWhatsAppService.generateAuthUrl(
+                      userObjectId.toString(),
+                      correlationId
+                    );
+
+                  if (authResult.success) {
+                    const connectionMessage =
+                      googleIntegrationWhatsAppService.formatConnectionMessage(
+                        authResult.authUrl
+                      );
+                    twiml.message(connectionMessage);
+                  } else {
+                    twiml.message(
+                      "❌ Erro ao gerar link de conexão. Tente novamente mais tarde."
+                    );
+                  }
+                } catch (error) {
+                  devLog(
+                    `[Webhook] Error generating Google auth URL for user ${userObjectId}:`,
+                    error
+                  );
+                  twiml.message(
+                    "❌ Erro ao conectar com Google Calendar. Tente novamente mais tarde."
+                  );
+                }
+                break;
+              }
+              case "google_disconnect": {
+                try {
+                  const correlationId = generateCorrelationId();
+                  devLog(
+                    `[Webhook] Google disconnect request for user ${userObjectId} (${correlationId})`
+                  );
+
+                  const result =
+                    await googleIntegrationWhatsAppService.disconnectGoogle(
+                      userObjectId.toString(),
+                      correlationId
+                    );
+
+                  twiml.message(result.message);
+                } catch (error) {
+                  devLog(
+                    `[Webhook] Error disconnecting Google for user ${userObjectId}:`,
+                    error
+                  );
+                  twiml.message(
+                    "❌ Erro ao desconectar Google Calendar. Tente novamente mais tarde."
+                  );
+                }
+                break;
+              }
+              case "google_status": {
+                try {
+                  const correlationId = generateCorrelationId();
+                  devLog(
+                    `[Webhook] Google status request for user ${userObjectId} (${correlationId})`
+                  );
+
+                  const status =
+                    await googleIntegrationWhatsAppService.getIntegrationStatus(
+                      userObjectId.toString(),
+                      correlationId
+                    );
+
+                  const statusMessage =
+                    googleIntegrationWhatsAppService.formatStatusMessage(
+                      status
+                    );
+                  twiml.message(statusMessage);
+                } catch (error) {
+                  devLog(
+                    `[Webhook] Error getting Google status for user ${userObjectId}:`,
+                    error
+                  );
+                  twiml.message(
+                    "❌ Erro ao verificar status do Google Calendar. Tente novamente mais tarde."
+                  );
+                }
+                break;
+              }
+              case "google_enable_sync": {
+                try {
+                  const correlationId = generateCorrelationId();
+                  devLog(
+                    `[Webhook] Google enable sync request for user ${userObjectId} (${correlationId})`
+                  );
+
+                  const result =
+                    await googleIntegrationWhatsAppService.setCalendarSyncEnabled(
+                      userObjectId.toString(),
+                      true,
+                      correlationId
+                    );
+
+                  twiml.message(result.message);
+                } catch (error) {
+                  devLog(
+                    `[Webhook] Error enabling Google sync for user ${userObjectId}:`,
+                    error
+                  );
+
+                  if (error.message.includes("must be connected")) {
+                    twiml.message(
+                      "❌ Você precisa conectar sua conta Google primeiro. Digite 'conectar google calendar' para começar."
+                    );
+                  } else {
+                    twiml.message(
+                      "❌ Erro ao ativar sincronização. Tente novamente mais tarde."
+                    );
+                  }
+                }
+                break;
+              }
+              case "google_disable_sync": {
+                try {
+                  const correlationId = generateCorrelationId();
+                  devLog(
+                    `[Webhook] Google disable sync request for user ${userObjectId} (${correlationId})`
+                  );
+
+                  const result =
+                    await googleIntegrationWhatsAppService.setCalendarSyncEnabled(
+                      userObjectId.toString(),
+                      false,
+                      correlationId
+                    );
+
+                  twiml.message(result.message);
+                } catch (error) {
+                  devLog(
+                    `[Webhook] Error disabling Google sync for user ${userObjectId}:`,
+                    error
+                  );
+
+                  if (error.message.includes("must be connected")) {
+                    twiml.message(
+                      "❌ Você precisa conectar sua conta Google primeiro. Digite 'conectar google calendar' para começar."
+                    );
+                  } else {
+                    twiml.message(
+                      "❌ Erro ao desativar sincronização. Tente novamente mais tarde."
+                    );
+                  }
+                }
+                break;
+              }
+              case "google_debug": {
+                try {
+                  const correlationId = generateCorrelationId();
+                  devLog(
+                    `[Webhook] Google debug request for user ${userObjectId} (${correlationId})`
+                  );
+
+                  const diagnostics =
+                    await googleIntegrationWhatsAppService.getDiagnosticInfo(
+                      correlationId
+                    );
+                  const diagnosticMessage =
+                    googleIntegrationWhatsAppService.formatDiagnosticMessage(
+                      diagnostics
+                    );
+
+                  twiml.message(diagnosticMessage);
+                } catch (error) {
+                  devLog(
+                    `[Webhook] Error generating Google diagnostics for user ${userObjectId}:`,
+                    error
+                  );
+                  twiml.message(
+                    "❌ Erro ao gerar diagnóstico. Tente novamente mais tarde."
+                  );
+                }
+                break;
+              }
+              case "financial_help": {
+                if (!(await hasAccessToFeature(userObjectId, "adap-turbo"))) {
+                  twiml.message(
+                    "🚫 Este recurso está disponível como um complemento pago. (...)"
+                  );
+                  break;
+                }
+                await sendFinancialHelpMessage(twiml, userMessage);
+                break;
+              }
+              case "create_inventory_template": {
+                if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
+                  twiml.message(
+                    "🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante."
+                  );
+                  break;
+                }
+
+                const { templateName } = interpretation.data;
+                if (!templateName) {
+                  twiml.message(
+                    "Por favor, me diga o nome do estoque que você quer criar. Ex: 'criar estoque de camisetas'"
+                  );
+                  break;
+                }
+
+                const existing = await InventoryTemplate.findOne({
+                  userId: userIdString,
+                  templateName: templateName.toLowerCase(),
+                });
+                if (existing) {
+                  twiml.message(
+                    `Você já possui um estoque chamado *${templateName}*. Escolha outro nome.`
+                  );
+                  break;
+                }
+
+                conversationState[userIdString] = {
+                  awaiting: "template_fields",
+                  payload: { templateName },
+                };
+                twiml.message(
+                  `Vamos criar o estoque *${templateName}*! 🎉\n\nQuais informações você quer salvar para cada item? Envie os nomes dos campos separados por vírgula (de 2 a 10).\n\n*Exemplo:* nome, cor, tamanho, preço de custo`
+                );
+                break;
+              }
+              case "add_product_to_inventory": {
+                if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
+                  twiml.message(
+                    "🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante."
+                  );
+                  break;
+                }
+
+                const { templateName } = interpretation.data;
+                if (!templateName) {
+                  twiml.message(
+                    "Por favor, especifique em qual estoque você quer adicionar o item. Ex: 'adicionar camiseta'"
+                  );
+                  break;
+                }
+
+                const template = await InventoryTemplate.findOne({
+                  userId: userIdString,
+                  templateName: {
+                    $regex: new RegExp(`^${templateName.toLowerCase()}`, "i"),
+                  },
+                });
+
+                if (!template) {
+                  twiml.message(
+                    `Não encontrei um estoque chamado *${templateName}*. Para ver seus estoques, diga "listar estoques".`
+                  );
+                  break;
+                }
+
+                conversationState[userIdString] = {
+                  awaiting: "product_attributes",
+                  payload: { template },
+                };
+
+                twiml.message(
+                  `Ok, adicionando um novo item ao estoque *${
+                    template.templateName
+                  }*.\n\nPor favor, envie os valores para os seguintes campos, separados por vírgula:\n\n*${template.fields.join(
+                    ", "
+                  )}*`
+                );
+                break;
+              }
+              case "list_inventory_templates": {
+                if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
+                  twiml.message(
+                    "🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante."
+                  );
+                  break;
+                }
+
+                const templates = await InventoryTemplate.find({
+                  userId: userIdString,
+                });
+
+                if (templates.length === 0) {
+                  twiml.message(
+                    "Você ainda não criou nenhum tipo de estoque. Para começar, diga 'criar estoque de [nome]'"
+                  );
+                } else {
+                  let message = "📦 *Seus Estoques Criados:*\n\n";
+                  templates.forEach((t) => {
+                    message += `• *${
+                      t.templateName.charAt(0).toUpperCase() +
+                      t.templateName.slice(1)
+                    }*\n   - Campos: _${t.fields.join(", ")}_\n\n`;
+                  });
+                  message += `Para adicionar um item, diga "adicionar [nome do estoque]".`;
+                  twiml.message(message);
+                }
+                break;
+              }
+              case "view_inventory": {
+                if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
+                  twiml.message(
+                    "🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante."
+                  );
+                  break;
+                }
+                const { templateName } = interpretation.data;
+                if (!templateName) {
+                  twiml.message(
+                    "Por favor, especifique qual estoque você quer ver. Ex: 'ver estoque de livros'"
+                  );
+                  break;
+                }
+
+                const { messages } = await getFormattedInventory(
+                  userIdString,
+                  templateName
+                );
+
+                const sendSequentially = async () => {
                   for (const chunk of messages) {
                     await sendTextMessage(req.body.From, chunk);
                     await new Promise((resolve) => setTimeout(resolve, 500));
                   }
-                } catch (error) {
-                  devLog("Erro no loop de envio sequencial:", error);
-                }
-              };
-              sendSequentially();
-
-              res.writeHead(200, { "Content-Type": "text/xml" });
-              res.end(new twilio.twiml.MessagingResponse().toString());
-              responseHasBeenSent = true;
-
-              break;
-            }
-            case "delete_list_item": {
-              const { itemNumber } = interpretation.data;
-              const state = conversationState[userIdString];
-
-              if (
-                !state ||
-                !state.detailedList ||
-                state.detailedList.length === 0
-              ) {
-                twiml.message(
-                  "Não encontrei uma lista de itens para apagar. Por favor, gere os 'detalhes' de seus gastos ou receitas primeiro."
-                );
+                };
+                sendSequentially();
+                responseHasBeenSent = true;
                 break;
               }
-
-              const index = itemNumber - 1;
-
-              if (index < 0 || index >= state.detailedList.length) {
-                twiml.message(
-                  `Número de item inválido. Por favor, escolha um número entre 1 e ${state.detailedList.length}.`
-                );
-                break;
-              }
-
-              const transactionIdToDelete = state.detailedList[index];
-
-              if (transactionIdToDelete === null) {
-                twiml.message(
-                  `🤔 O item número ${itemNumber} já foi apagado nesta sessão.`
-                );
-                break;
-              }
-
-              const transaction = await Transaction.findById(
-                transactionIdToDelete
-              );
-
-              if (!transaction) {
-                conversationState[userIdString].detailedList[index] = null;
-                twiml.message(
-                  "Ops, este item já foi apagado ou não foi encontrado no banco de dados."
-                );
-                twiml.message(
-                  "Ops, este item já foi apagado ou não foi encontrado no banco de dados."
-                );
-                break;
-              }
-
-              await Transaction.findByIdAndDelete(transactionIdToDelete);
-
-              const updateField =
-                transaction.type === "income" ? "totalIncome" : "totalSpent";
-              await UserStats.findOneAndUpdate(
-                { userId: userObjectId },
-                { $inc: { [updateField]: -transaction.amount } }
-              );
-
-              twiml.message(
-                `✅ Item "${
-                  transaction.description
-                }" no valor de R$ ${transaction.amount.toFixed(
-                  2
-                )} foi apagado com sucesso!`
-              );
-
-              conversationState[userIdString].detailedList[index] = null;
-
-              break;
-            }
-            case "reminder": {
-              const { description, date } = interpretation.data;
-              if (!date) {
-                twiml.message(
-                  "⏰ Por favor, forneça uma data e hora futuras válidas para o lembrete. Ex: 'Lembrar de ligar para o dentista amanhã às 14h'."
-                );
-                break;
-              }
-
-              const localDateString = date.slice(0, 19);
-              const dateToSave = fromZonedTime(localDateString, TIMEZONE);
-
-              if (!(dateToSave > new Date())) {
-                twiml.message(
-                  "⏰ Ops, essa data já passou! Por favor, forneça uma data e hora futuras."
-                );
-                break;
-              }
-
-              // Use the new ReminderService for creation with Google Calendar integration
-              const reminderData = {
-                description: description,
-                date: dateToSave,
-              };
-
-              const userPhoneNumberClean = req.body.From.replace(
-                "whatsapp:",
-                ""
-              );
-              const correlationId = generateCorrelationId();
-
-              try {
-                const result = await reminderService.createReminder(
-                  reminderData,
-                  userIdString,
-                  userPhoneNumberClean,
-                  correlationId
-                );
-                await sendReminderMessage(twiml, userMessage, result.reminder);
-              } catch (error) {
-                devLog(
-                  `[Webhook] Error creating reminder for user ${userIdString} (${correlationId}):`,
-                  error
-                );
-                twiml.message(
-                  "❌ Ocorreu um erro ao criar o lembrete. Tente novamente mais tarde."
-                );
-              }
-              break;
-            }
-            case "delete_reminder": {
-              const { messageId } = interpretation.data;
-
-              try {
-                const result = await reminderService.deleteReminder(
-                  messageId,
-                  userIdString
-                );
-                if (result.found) {
-                  sendReminderDeletedMessage(twiml, result.reminder);
-                } else {
+              case "update_inventory_quantity": {
+                if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
                   twiml.message(
-                    `🚫 Nenhum lembrete encontrado com o ID #_${messageId}_ para exclusão.`
+                    "🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante."
                   );
-                }
-              } catch (error) {
-                devLog(
-                  `[Webhook] Error deleting reminder ${messageId} for user ${userIdString}:`,
-                  error
-                );
-                twiml.message(
-                  "❌ Ocorreu um erro ao excluir o lembrete. Tente novamente mais tarde."
-                );
-              }
-              break;
-            }
-            case "get_total_reminders": {
-              const totalReminders = await getTotalReminders(userIdString);
-              sendTotalRemindersMessage(twiml, totalReminders);
-              break;
-            }
-            case "google_connect": {
-              try {
-                const correlationId = generateCorrelationId();
-                devLog(
-                  `[Webhook] Google connect request for user ${userObjectId} (${correlationId})`
-                );
-
-                // Generate OAuth URL
-                const authResult =
-                  await googleIntegrationWhatsAppService.generateAuthUrl(
-                    userObjectId.toString(),
-                    correlationId
-                  );
-
-                if (authResult.success) {
-                  const connectionMessage =
-                    googleIntegrationWhatsAppService.formatConnectionMessage(
-                      authResult.authUrl
-                    );
-                  twiml.message(connectionMessage);
-                } else {
-                  twiml.message(
-                    "❌ Erro ao gerar link de conexão. Tente novamente mais tarde."
-                  );
-                }
-              } catch (error) {
-                devLog(
-                  `[Webhook] Error generating Google auth URL for user ${userObjectId}:`,
-                  error
-                );
-                twiml.message(
-                  "❌ Erro ao conectar com Google Calendar. Tente novamente mais tarde."
-                );
-              }
-              break;
-            }
-            case "google_disconnect": {
-              try {
-                const correlationId = generateCorrelationId();
-                devLog(
-                  `[Webhook] Google disconnect request for user ${userObjectId} (${correlationId})`
-                );
-
-                const result =
-                  await googleIntegrationWhatsAppService.disconnectGoogle(
-                    userObjectId.toString(),
-                    correlationId
-                  );
-
-                twiml.message(result.message);
-              } catch (error) {
-                devLog(
-                  `[Webhook] Error disconnecting Google for user ${userObjectId}:`,
-                  error
-                );
-                twiml.message(
-                  "❌ Erro ao desconectar Google Calendar. Tente novamente mais tarde."
-                );
-              }
-              break;
-            }
-            case "google_status": {
-              try {
-                const correlationId = generateCorrelationId();
-                devLog(
-                  `[Webhook] Google status request for user ${userObjectId} (${correlationId})`
-                );
-
-                const status =
-                  await googleIntegrationWhatsAppService.getIntegrationStatus(
-                    userObjectId.toString(),
-                    correlationId
-                  );
-
-                const statusMessage =
-                  googleIntegrationWhatsAppService.formatStatusMessage(status);
-                twiml.message(statusMessage);
-              } catch (error) {
-                devLog(
-                  `[Webhook] Error getting Google status for user ${userObjectId}:`,
-                  error
-                );
-                twiml.message(
-                  "❌ Erro ao verificar status do Google Calendar. Tente novamente mais tarde."
-                );
-              }
-              break;
-            }
-            case "google_enable_sync": {
-              try {
-                const correlationId = generateCorrelationId();
-                devLog(
-                  `[Webhook] Google enable sync request for user ${userObjectId} (${correlationId})`
-                );
-
-                const result =
-                  await googleIntegrationWhatsAppService.setCalendarSyncEnabled(
-                    userObjectId.toString(),
-                    true,
-                    correlationId
-                  );
-
-                twiml.message(result.message);
-              } catch (error) {
-                devLog(
-                  `[Webhook] Error enabling Google sync for user ${userObjectId}:`,
-                  error
-                );
-
-                if (error.message.includes("must be connected")) {
-                  twiml.message(
-                    "❌ Você precisa conectar sua conta Google primeiro. Digite 'conectar google calendar' para começar."
-                  );
-                } else {
-                  twiml.message(
-                    "❌ Erro ao ativar sincronização. Tente novamente mais tarde."
-                  );
-                }
-              }
-              break;
-            }
-            case "google_disable_sync": {
-              try {
-                const correlationId = generateCorrelationId();
-                devLog(
-                  `[Webhook] Google disable sync request for user ${userObjectId} (${correlationId})`
-                );
-
-                const result =
-                  await googleIntegrationWhatsAppService.setCalendarSyncEnabled(
-                    userObjectId.toString(),
-                    false,
-                    correlationId
-                  );
-
-                twiml.message(result.message);
-              } catch (error) {
-                devLog(
-                  `[Webhook] Error disabling Google sync for user ${userObjectId}:`,
-                  error
-                );
-
-                if (error.message.includes("must be connected")) {
-                  twiml.message(
-                    "❌ Você precisa conectar sua conta Google primeiro. Digite 'conectar google calendar' para começar."
-                  );
-                } else {
-                  twiml.message(
-                    "❌ Erro ao desativar sincronização. Tente novamente mais tarde."
-                  );
-                }
-              }
-              break;
-            }
-            case "google_debug": {
-              try {
-                const correlationId = generateCorrelationId();
-                devLog(
-                  `[Webhook] Google debug request for user ${userObjectId} (${correlationId})`
-                );
-
-                const diagnostics =
-                  await googleIntegrationWhatsAppService.getDiagnosticInfo(
-                    correlationId
-                  );
-                const diagnosticMessage =
-                  googleIntegrationWhatsAppService.formatDiagnosticMessage(
-                    diagnostics
-                  );
-
-                twiml.message(diagnosticMessage);
-              } catch (error) {
-                devLog(
-                  `[Webhook] Error generating Google diagnostics for user ${userObjectId}:`,
-                  error
-                );
-                twiml.message(
-                  "❌ Erro ao gerar diagnóstico. Tente novamente mais tarde."
-                );
-              }
-              break;
-            }
-            case "financial_help": {
-              if (!(await hasAccessToFeature(userObjectId, "adap-turbo"))) {
-                twiml.message(
-                  "🚫 Este recurso está disponível como um complemento pago. (...)"
-                );
-                break;
-              }
-              await sendFinancialHelpMessage(twiml, userMessage);
-              break;
-            }
-            case "create_inventory_template": {
-              if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
-                twiml.message(
-                  "🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante."
-                );
-                break;
-              }
-
-              const { templateName } = interpretation.data;
-              if (!templateName) {
-                twiml.message(
-                  "Por favor, me diga o nome do estoque que você quer criar. Ex: 'criar estoque de camisetas'"
-                );
-                break;
-              }
-
-              const existing = await InventoryTemplate.findOne({
-                userId: userIdString,
-                templateName: templateName.toLowerCase(),
-              });
-              if (existing) {
-                twiml.message(
-                  `Você já possui um estoque chamado *${templateName}*. Escolha outro nome.`
-                );
-                break;
-              }
-
-              conversationState[userIdString] = {
-                awaiting: "template_fields",
-                payload: { templateName },
-              };
-              twiml.message(
-                `Vamos criar o estoque *${templateName}*! 🎉\n\nQuais informações você quer salvar para cada item? Envie os nomes dos campos separados por vírgula (de 2 a 10).\n\n*Exemplo:* nome, cor, tamanho, preço de custo`
-              );
-              break;
-            }
-            case "add_product_to_inventory": {
-              if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
-                twiml.message(
-                  "🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante."
-                );
-                break;
-              }
-
-              const { templateName } = interpretation.data;
-              if (!templateName) {
-                twiml.message(
-                  "Por favor, especifique em qual estoque você quer adicionar o item. Ex: 'adicionar camiseta'"
-                );
-                break;
-              }
-
-              const template = await InventoryTemplate.findOne({
-                userId: userIdString,
-                templateName: {
-                  $regex: new RegExp(`^${templateName.toLowerCase()}`, "i"),
-                },
-              });
-
-              if (!template) {
-                twiml.message(
-                  `Não encontrei um estoque chamado *${templateName}*. Para ver seus estoques, diga "listar estoques".`
-                );
-                break;
-              }
-
-              conversationState[userIdString] = {
-                awaiting: "product_attributes",
-                payload: { template },
-              };
-
-              twiml.message(
-                `Ok, adicionando um novo item ao estoque *${
-                  template.templateName
-                }*.\n\nPor favor, envie os valores para os seguintes campos, separados por vírgula:\n\n*${template.fields.join(
-                  ", "
-                )}*`
-              );
-              break;
-            }
-            case "list_inventory_templates": {
-              if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
-                twiml.message(
-                  "🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante."
-                );
-                break;
-              }
-
-              const templates = await InventoryTemplate.find({
-                userId: userIdString,
-              });
-
-              if (templates.length === 0) {
-                twiml.message(
-                  "Você ainda não criou nenhum tipo de estoque. Para começar, diga 'criar estoque de [nome]'"
-                );
-              } else {
-                let message = "📦 *Seus Estoques Criados:*\n\n";
-                templates.forEach((t) => {
-                  message += `• *${
-                    t.templateName.charAt(0).toUpperCase() +
-                    t.templateName.slice(1)
-                  }*\n   - Campos: _${t.fields.join(", ")}_\n\n`;
-                });
-                message += `Para adicionar um item, diga "adicionar [nome do estoque]".`;
-                twiml.message(message);
-              }
-              break;
-            }
-            case "view_inventory": {
-              if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
-                twiml.message(
-                  "🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante."
-                );
-                break;
-              }
-              const { templateName } = interpretation.data;
-              if (!templateName) {
-                twiml.message(
-                  "Por favor, especifique qual estoque você quer ver. Ex: 'ver estoque de livros'"
-                );
-                break;
-              }
-
-              const { messages } = await getFormattedInventory(
-                userIdString,
-                templateName
-              );
-
-              const sendSequentially = async () => {
-                for (const chunk of messages) {
-                  await sendTextMessage(req.body.From, chunk);
-                  await new Promise((resolve) => setTimeout(resolve, 500));
-                }
-              };
-              sendSequentially();
-              responseHasBeenSent = true;
-              break;
-            }
-            case "update_inventory_quantity": {
-              if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
-                twiml.message("🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante.");
-                break;
-              }
-              let { quantity, productId } = interpretation.data;
-              if (quantity === undefined || !productId) {
-                twiml.message("Formato incorreto. Use: entrada/saída [quantidade] #[ID]. Ex: *vendi 2 #P0001*");
-                break;
-              }
-              productId = productId.toUpperCase();
-              
-              const product = await Product.findOne({
-                userId: userIdString,
-                customId: productId,
-              });
-
-              if (!product) {
-                twiml.message(`🚫 Não encontrei produto com o ID *#${productId}*.`);
-                break;
-              }
-
-              if (quantity < 0 && product.quantity < Math.abs(quantity)) {
-                  twiml.message(`⚠️ *Operação não permitida!*\n\nVocê tentou dar saída de ${Math.abs(quantity)} unidades, mas só há ${product.quantity} em estoque.`);
                   break;
-              }
+                }
+                let { quantity, productId } = interpretation.data;
+                if (quantity === undefined || !productId) {
+                  twiml.message(
+                    "Formato incorreto. Use: entrada/saída [quantidade] #[ID]. Ex: *vendi 2 #P0001*"
+                  );
+                  break;
+                }
+                productId = productId.toUpperCase();
 
-              const updatedProduct = await Product.findOneAndUpdate(
-                { _id: product._id },
-                { $inc: { quantity: quantity } },
-                { new: true }
-              );
-              
-              const movementType = quantity > 0 ? "Entrada" : "Saída";
-              
-              const productName = Object.values(Object.fromEntries(updatedProduct.attributes)).join(" ");
-              
-              let responseMessage = `✅ *${movementType} registrada!*\n\n*Produto:* ${productName} (#${updatedProduct.customId})\n*Estoque Atual:* ${updatedProduct.quantity} unidades.`;
-              twiml.message(responseMessage);
-              
-              if (updatedProduct.quantity <= updatedProduct.minStockLevel) {
-                 setTimeout(() => {
+                const product = await Product.findOne({
+                  userId: userIdString,
+                  customId: productId,
+                });
+
+                if (!product) {
+                  twiml.message(
+                    `🚫 Não encontrei produto com o ID *#${productId}*.`
+                  );
+                  break;
+                }
+
+                if (quantity < 0 && product.quantity < Math.abs(quantity)) {
+                  twiml.message(
+                    `⚠️ *Operação não permitida!*\n\nVocê tentou dar saída de ${Math.abs(
+                      quantity
+                    )} unidades, mas só há ${product.quantity} em estoque.`
+                  );
+                  break;
+                }
+
+                const updatedProduct = await Product.findOneAndUpdate(
+                  { _id: product._id },
+                  { $inc: { quantity: quantity } },
+                  { new: true }
+                );
+
+                const movementType = quantity > 0 ? "Entrada" : "Saída";
+
+                const productName = Object.values(
+                  Object.fromEntries(updatedProduct.attributes)
+                ).join(" ");
+
+                let responseMessage = `✅ *${movementType} registrada!*\n\n*Produto:* ${productName} (#${updatedProduct.customId})\n*Estoque Atual:* ${updatedProduct.quantity} unidades.`;
+                twiml.message(responseMessage);
+
+                if (updatedProduct.quantity <= updatedProduct.minStockLevel) {
+                  setTimeout(() => {
                     const alertMessage = `⚠️ *Alerta de Estoque Baixo!*\n\nO produto *${productName}* (#${updatedProduct.customId}) atingiu o nível mínimo.\n\n*Quantidade Atual:* ${updatedProduct.quantity}`;
                     sendTextMessage(req.body.From, alertMessage);
-                 }, 1000);
-              }
-              
-              break;
-            }
-            case "set_inventory_alert": {
-              if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
-                twiml.message("🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante.");
+                  }, 1000);
+                }
+
                 break;
               }
+              case "set_inventory_alert": {
+                if (!(await hasAccessToFeature(userObjectId, "inventory"))) {
+                  twiml.message(
+                    "🚫 A funcionalidade de controle de estoque está disponível apenas no plano Diamante."
+                  );
+                  break;
+                }
 
-              let { productId, quantity } = interpretation.data;
+                let { productId, quantity } = interpretation.data;
 
-              if (quantity === undefined || !productId) {
-                twiml.message("Formato incorreto. Use: definir alerta #[ID] para [quantidade]. Ex: *alerta #P0001 para 10*");
+                if (quantity === undefined || !productId) {
+                  twiml.message(
+                    "Formato incorreto. Use: definir alerta #[ID] para [quantidade]. Ex: *alerta #P0001 para 10*"
+                  );
+                  break;
+                }
+
+                productId = productId.toUpperCase();
+
+                const product = await Product.findOne({
+                  userId: userIdString,
+                  customId: productId,
+                });
+
+                if (!product) {
+                  twiml.message(
+                    `🚫 Não encontrei produto com o ID *#${productId}*.`
+                  );
+                  break;
+                }
+
+                await Product.updateOne(
+                  { _id: product._id },
+                  { $set: { minStockLevel: quantity } }
+                );
+
+                const productName = Object.values(
+                  Object.fromEntries(product.attributes)
+                ).join(" ");
+
+                twiml.message(
+                  `✅ Alerta para o produto *${productName}* (#${productId}) definido para *${quantity} unidades*.`
+                );
+
                 break;
               }
-
-              productId = productId.toUpperCase();
-              
-              const product = await Product.findOne({
-                userId: userIdString,
-                customId: productId,
-              });
-
-              if (!product) {
-                twiml.message(`🚫 Não encontrei produto com o ID *#${productId}*.`);
+              case "greeting": {
+                sendGreetingMessage(twiml);
                 break;
               }
-
-              await Product.updateOne(
-                { _id: product._id },
-                { $set: { minStockLevel: quantity } }
-              );
-
-              const productName = Object.values(Object.fromEntries(product.attributes)).join(" ");
-              
-              twiml.message(`✅ Alerta para o produto *${productName}* (#${productId}) definido para *${quantity} unidades*.`);
-              
-              break;
+              default:
+                sendHelpMessage(twiml);
+                break;
             }
-            case "greeting": {
-              sendGreetingMessage(twiml);
-              break;
-            }
-            default:
-              sendHelpMessage(twiml);
-              break;
           }
-        }
         } catch (err) {
           devLog("Erro ao interpretar a mensagem:", err);
           sendHelpMessage(twiml);
@@ -1796,7 +1845,7 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
       res.writeHead(200, { "Content-Type": "text/xml" });
       res.end(twiml.toString());
     }
-    }
+  }
 });
 
 export default router;
