@@ -36,7 +36,6 @@ class ReminderService {
       // Create reminder object
       const newReminder = new Reminder({
         userId: userId,
-        userPhoneNumber: userPhoneNumber,
         description: reminderData.description,
         date: reminderData.date,
         messageId: messageId,
