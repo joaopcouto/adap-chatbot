@@ -66,7 +66,8 @@ export async function interpretMessageWithAI(message, currentDate) {
   - Dia atual: ${currentDay} (${dayOfWeekName})
 
   1. Identificar a Intenção:
-     Determine a intenção do usuário com base em sua mensagem. As possíveis intenções incluem:
+    Priorize intenções relacionadas a "estoque" se as palavras-chave 'criar estoque', 'adicionar ao estoque', 'ver estoque', etc., estiverem presentes.
+    Determine a intenção do usuário com base em sua mensagem. As possíveis intenções incluem:
       "add_income" → O usuário quer registrar uma receita. Extraia o valor, descrição e categoria. 
       "add_expense" → O usuário quer registrar uma despesa. Extraia o valor, descrição e categoria.
       "add_transaction_new_category" → O usuário quer registrar uma transação (receita ou despesa) com uma nova categoria. Extraia o valor, descrição, categoria e tipo.
@@ -99,6 +100,7 @@ export async function interpretMessageWithAI(message, currentDate) {
       "list_inventory_templates" -> O usuário quer ver todos os tipos de estoque que ele já criou.
       "update_inventory_quantity" -> O usuário quer registrar uma entrada ou saída de um produto no estoque. Extraia a quantidade e o ID do produto.
       "view_inventory" -> O usuário quer listar os produtos de um estoque específico. Extraia o nome do template.
+      "set_inventory_alert" -> O usuário quer definir o nível mínimo de estoque para um produto. Extraia o productId e a quantidade.
       "unknown" → A mensagem não corresponde a nenhuma das intenções acima.
   
   2. Regras de Extração de Dados:
@@ -131,7 +133,7 @@ export async function interpretMessageWithAI(message, currentDate) {
        Responda apenas com um objeto JSON válido sem qualquer formatação ou explicação adicional
      - Retorne um objeto JSON com a intenção e dados extraídos. Use este formato:
        {
-         "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "delete_list_item" | "generate_daily_chart" | "generate_category_chart" | "generate_income_category_chart" | "get_total_income" |"get_total" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "google_connect" | "google_disconnect" | "google_status" | "google_enable_sync" | "google_disable_sync" | "google_debug" | "financial_help" | "create_inventory_template" | "add_product_to_inventory" | "list_inventory_templates" | "update_inventory_quantity" | "view_inventory" ,
+         "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "delete_list_item" | "generate_daily_chart" | "generate_category_chart" | "generate_income_category_chart" | "get_total_income" |"get_total" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "google_connect" | "google_disconnect" | "google_status" | "google_enable_sync" | "google_disable_sync" | "google_debug" | "financial_help" | "create_inventory_template" | "add_product_to_inventory" | "list_inventory_templates" | "update_inventory_quantity" | "view_inventory" | "set_inventory_alert" ,
          "data": {
            "amount": number,
            "description": string,
@@ -274,7 +276,7 @@ export async function interpretMessageWithAI(message, currentDate) {
 
     - Usuário: "criar estoque de camisetas"
       Resposta: { "intent": "create_inventory_template", "data": { "templateName": "camisetas" } }
-    - Usuário: "novo estoque para bebidas"
+    - Usuário: "criar um estoque para bebidas"
       Resposta: { "intent": "create_inventory_template", "data": { "templateName": "bebidas" } }
 
     - Usuário: "adicionar camiseta"
@@ -284,7 +286,7 @@ export async function interpretMessageWithAI(message, currentDate) {
       
     - Usuário: "quais estoques eu tenho?"
       Resposta: { "intent": "list_inventory_templates", "data": {} }
-    - Usuário: "listar estoques"
+    - Usuário: "meus estoques"
       Resposta: { "intent": "list_inventory_templates", "data": {} }
       
     - Usuário: "ver estoque de livros"
@@ -298,8 +300,13 @@ export async function interpretMessageWithAI(message, currentDate) {
       Resposta: { "intent": "update_inventory_quantity", "data": { "quantity": -3, "productId": "P0002" } }
     - Usuário: "vendi 1 #p0003"
       Resposta: { "intent": "update_inventory_quantity", "data": { "quantity": -1, "productId": "p0003" } }
-    - Usuário: "adicionei 50 unidades ao item #P0004"
-      Resposta: { "intent": "update_inventory_quantity", "data": { "quantity": 50, "productId": "P0004" } }
+
+    - Usuário: "definir alerta #P0001 para 10 unidades"
+      Resposta: { "intent": "set_inventory_alert", "data": { "productId": "P0001", "quantity": 10 } }
+    - Usuário: "alerta do #p0002 para 5"
+      Resposta: { "intent": "set_inventory_alert", "data": { "productId": "p0002", "quantity": 5 } }
+    - Usuário: "avise-me quando #P0003 estiver com 20"
+      Resposta: { "intent": "set_inventory_alert", "data": { "productId": "P0003", "quantity": 20 } }
      
   
   Agora, interprete esta mensagem: "${message}"`;
