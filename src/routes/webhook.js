@@ -1313,14 +1313,14 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               try {
                 const result = await reminderService.createReminder(
                   reminderData,
-                  userObjectId,
+                  userIdString,
                   userPhoneNumberClean,
                   correlationId
                 );
                 await sendReminderMessage(twiml, userMessage, result.reminder);
               } catch (error) {
                 devLog(
-                  `[Webhook] Error creating reminder for user ${userObjectId} (${correlationId}):`,
+                  `[Webhook] Error creating reminder for user ${userIdString} (${correlationId}):`,
                   error
                 );
                 twiml.message(
@@ -1335,7 +1335,7 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               try {
                 const result = await reminderService.deleteReminder(
                   messageId,
-                  userObjectId
+                  userIdString
                 );
                 if (result.found) {
                   sendReminderDeletedMessage(twiml, result.reminder);
@@ -1346,7 +1346,7 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                 }
               } catch (error) {
                 devLog(
-                  `[Webhook] Error deleting reminder ${messageId} for user ${userObjectId}:`,
+                  `[Webhook] Error deleting reminder ${messageId} for user ${userIdString}:`,
                   error
                 );
                 twiml.message(
@@ -1356,7 +1356,7 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               break;
             }
             case "get_total_reminders": {
-              const totalReminders = await getTotalReminders(userObjectId);
+              const totalReminders = await getTotalReminders(userIdString);
               sendTotalRemindersMessage(twiml, totalReminders);
               break;
             }

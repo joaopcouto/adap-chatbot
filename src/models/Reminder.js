@@ -2,14 +2,9 @@ import mongoose from "mongoose";
 
 const reminderSchema = new mongoose.Schema({
     userId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User', 
+        type: String, 
         required: true,
         index: true 
-    },
-    userPhoneNumber: {
-        type: String,
-        required: true,
     },
     description: {
         type: String,
@@ -24,6 +19,10 @@ const reminderSchema = new mongoose.Schema({
         required: true,
         unique: true
     },
-});
+    status: {          
+        type: String,
+        default: 'pending'
+    }
+}, { timestamps: true }); 
 
 export default mongoose.model("Reminder", reminderSchema);
