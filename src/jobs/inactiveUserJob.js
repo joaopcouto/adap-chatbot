@@ -30,7 +30,7 @@ async function dailyTasks() {
 }
 
 export function startInactiveUserJob() {
-  cron.schedule('* * * * *', dailyTasks, { 
+  cron.schedule('15 13 * * *', dailyTasks, { 
     scheduled: true, 
     timezone: "America/Sao_Paulo" 
   });
