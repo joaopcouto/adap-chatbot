@@ -30,6 +30,9 @@ async function dailyTasks() {
 }
 
 export function startInactiveUserJob() {
-  cron.schedule('0 9 * * *', dailyTasks, { scheduled: true, timezone: "America/Sao_Paulo" });
+  cron.schedule('20 12 * * *', dailyTasks, { 
+    scheduled: true, 
+    timezone: "America/Sao_Paulo" 
+  });
   devLog("✅ Job de tarefas diárias (inatividade e sheets) agendado.");
 }
