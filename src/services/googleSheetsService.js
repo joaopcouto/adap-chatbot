@@ -10,10 +10,11 @@ let auth;
 
 if (process.env.NODE_ENV === 'prod' && process.env.GOOGLE_CREDENTIALS_JSON) {
   try {
-    const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
+    const decodedCredentials = Buffer.from(process.env.GOOGLE_CREDENTIALS_BASE64, 'base64').toString('utf-8');
+    const credentials = JSON.parse(decodedCredentials);
     auth = google.auth.fromJSON(credentials);
     auth.scopes = ['https://www.googleapis.com/auth/spreadsheets'];
-  } catch (error) { console.error('Falha ao parsear GOOGLE_CREDENTIALS_JSON:', error); }
+  } catch (error) { console.error('Falha ao decodificar/parsear GOOGLE_CREDENTIALS_BASE64:', error); }
 } else {
   const KEYFILEPATH = path.join(process.cwd(), 'credentials.json');
   auth = new google.auth.GoogleAuth({
