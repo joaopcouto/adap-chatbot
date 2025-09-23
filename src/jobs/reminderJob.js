@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import Reminder from "../models/Reminder.js";
+import User from "../models/User.js"; // 1. Importe o modelo User
 import { sendTemplateMessage } from "../services/twilioService.js";
 import { devLog } from "../helpers/logger.js";
 import { formatPhoneNumber } from "../utils/formatPhone.js";
@@ -9,14 +10,16 @@ dotenv.config();
 
 async function checkAndSendReminders() {
   const now = new Date();
-  devLog(
-    `[ReminderJob] Executando... Verificando lembretes para antes de ${now.toISOString()}`
-  );
+  devLog(`[ReminderJob] Executando... Verificando lembretes para antes de ${now.toISOString()}`);
 
   try {
     const dueReminders = await Reminder.find({
       date: { $lte: now },
-      userPhoneNumber: { $exists: true, $ne: null },
+      status: 'pending'
+    }).populate({
+      path: 'userId',
+      model: User,
+      select: 'phoneNumber name'
     });
 
     if (dueReminders.length === 0) {
@@ -24,41 +27,31 @@ async function checkAndSendReminders() {
       return;
     }
 
-    devLog(
-      `[ReminderJob] Encontrou ${dueReminders.length} lembrete(s) para enviar.`
-    );
+    devLog(`[ReminderJob] Encontrou ${dueReminders.length} lembrete(s) para enviar.`);
+
+    const templateSid = process.env.TWILIO_REMINDER_TEMPLATE_SID;
 
     for (const reminder of dueReminders) {
-      try {
-        const recipient = formatPhoneNumber(reminder.userPhoneNumber);
-
-        if (!recipient) {
-          devLog(
-            `[ReminderJob] Lembrete #${reminder.messageId} tem número inválido. Pulando.`
-          );
+      if (!reminder.userId || !reminder.userId.phoneNumber) {
+          devLog(`[ReminderJob] Lembrete #${reminder.messageId} para usuário desconhecido ou sem número. Pulando.`);
           continue;
-        }
-
-        const templateSid = process.env.TWILIO_REMINDER_TEMPLATE_SID;
+      }
+      
+      try {
+        const recipient = formatPhoneNumber(reminder.userId.phoneNumber);
 
         const templateVariables = {
-          1: reminder.description,
+          '1': reminder.description,
         };
 
-        devLog("[ReminderJob] MODO PRODUÇÃO: Enviando template real.");
         await sendTemplateMessage(recipient, templateSid, templateVariables);
-        
-        devLog(
-          `[ReminderJob] Lembrete #${reminder.messageId} enviado via template para ${recipient}.`
-        );
+        devLog(`[ReminderJob] Lembrete #${reminder.messageId} enviado para ${recipient}.`);
 
-        await Reminder.findByIdAndDelete(reminder._id);
-        devLog(`[ReminderJob] Lembrete #${reminder.messageId} excluído.`);
+        await Reminder.updateOne({ _id: reminder._id }, { $set: { status: 'completed' } });
+        devLog(`[ReminderJob] Lembrete #${reminder.messageId} marcado como concluído.`);
+        
       } catch (sendError) {
-        devLog(
-          `[ReminderJob] Falha ao enviar ou excluir lembrete #${reminder.messageId}. Erro:`,
-          sendError
-        );
+        devLog(`[ReminderJob] Falha ao enviar lembrete #${reminder.messageId}. Erro:`, sendError);
       }
     }
   } catch (error) {
@@ -66,7 +59,6 @@ async function checkAndSendReminders() {
   }
 }
 
-//Roda a cada minuto ('* * * * *')
 export function startReminderJob() {
   devLog("[Scheduler] Job de lembretes iniciado. Verificando a cada minuto.");
   cron.schedule("* * * * *", () => {
