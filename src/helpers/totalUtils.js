@@ -648,3 +648,8 @@ export async function getFormattedInventory(userId, templateName) {
 
   return { messages: finalMessages };
 }
+
+export async function getUserCategories(userId) {
+  const categories = await Category.find({ userId: userId }).lean();
+  return categories.map(c => c.name.charAt(0).toUpperCase() + c.name.slice(1));
+}

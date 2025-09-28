@@ -349,19 +349,16 @@ export async function interpretDocumentWithAI(imageUrl) {
   - **totalAmount**: Extraia o valor final pago. Use a lógica de prioridade: "Valor a Pagar" > Valor na linha da "Forma de Pagamento" > "Valor Total".
   - **storeName**: Extraia o nome do estabelecimento.
   - **purchaseDate**: Extraia a data da compra.
-  - **category**: Sugira uma categoria apropriada (ex: Supermercado -> "Alimentação").
 
   **Se o tipo for 'utility_bill':**
   - **totalAmount**: Extraia o valor principal da conta (Total a Pagar).
   - **provider**: Extraia o nome da empresa fornecedora (ex: "ENEL", "CLARO S.A.").
   - **dueDate**: Extraia a DATA DE VENCIMENTO.
-  - **category**: A categoria deve ser "Gastos Fixos".
 
   **Se o tipo for 'pix_receipt':**
   - **totalAmount**: Extraia o valor do PIX.
   - **counterpartName**: Extraia o nome do beneficiário (para quem foi pago) ou do pagador (de quem recebeu). É o nome da "outra ponta" da transação.
   - **transactionDate**: Extraia a data em que o PIX foi efetivado.
-  - **category**: A categoria deve ser "Transferência".
 
   **REGRAS GERAIS:**
   - Todas as datas devem ser retornadas no formato YYYY-MM-DD.
@@ -373,7 +370,7 @@ export async function interpretDocumentWithAI(imageUrl) {
     "documentType": "store_receipt" | "utility_bill" | "pix_receipt" | "unknown",
     "data": {
       "totalAmount": 123.45,
-      "storeName": "NOME DA LOJA", "purchaseDate": "2025-08-23", "category": "Alimentação",
+      "storeName": "NOME DA LOJA", "purchaseDate": "2025-08-23",
       "provider": "NOME DA EMPRESA", "dueDate": "2025-09-10",
       "counterpartName": "NOME DO BENEFICIÁRIO/PAGADOR", "transactionDate": "2025-08-22"
     }

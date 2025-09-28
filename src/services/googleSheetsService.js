@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
+const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
 let auth;
 
 if (process.env.NODE_ENV === 'prod' && process.env.GOOGLE_CREDENTIALS_JSON) {

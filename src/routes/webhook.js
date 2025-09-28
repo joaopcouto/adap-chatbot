@@ -1,8 +1,7 @@
 import express from "express";
 import twilio from "twilio";
 import {
-  sendTextMessage,
-  sendTextMessageTEST,
+  sendTextMessage
 } from "../services/twilioService.js";
 import { devLog } from "../helpers/logger.js";
 import { generateCorrelationId } from "../helpers/logger.js";
@@ -28,6 +27,7 @@ import {
   getOrCreateCategory,
   getActiveInstallments,
   getFormattedInventory,
+  getUserCategories
 } from "../helpers/totalUtils.js";
 import {
   generateChart,
@@ -156,7 +156,43 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
         22
       );
 
-      if (previousData.awaiting === "template_fields") {
+      if (previousData.awaiting === "document_category_confirmation") {
+        const categoryName = userMessage.trim();
+        const { documentType, ...data } = previousData.payload;
+
+        const categoryDoc = await getOrCreateCategory(userIdString, categoryName);
+
+        const transactionDetails = {
+            amount: data.totalAmount,
+            date: new Date(data.purchaseDate || data.transactionDate || data.dueDate || Date.now()),
+            description: data.storeName || data.provider || (data.counterpartName ? `PIX para/de ${data.counterpartName}` : 'Transação'),
+            type: 'expense'
+        };
+
+        if (documentType === 'pix_receipt') {
+            conversationState[userIdString] = {
+                awaiting: 'pix_type_confirmation',
+                payload: { ...transactionDetails, categoryId: categoryDoc._id.toString(), categoryName: categoryName } // Passa o categoryName
+            };
+            twiml.message("Este PIX foi um pagamento que você *FEZ* ou um valor que você *RECEBEU*?\n\nResponda `fiz` ou `recebi`.");
+        } else {
+            const defaultPaymentMethod = await PaymentMethod.findOne({ type: "pix" });
+            const newTransaction = new Transaction({
+                userId: userIdString,
+                ...transactionDetails,
+                categoryId: categoryDoc._id.toString(),
+                messageId: generateId(),
+                paymentMethodId: defaultPaymentMethod._id.toString(),
+                status: documentType === 'utility_bill' ? 'pending' : 'completed',
+            });
+            await newTransaction.save();
+            await UserStats.findOneAndUpdate({ userId: userObjectId }, { $inc: { totalSpent: newTransaction.amount } }, { upsert: true });
+
+            twiml.message(`✅ Transação de *${newTransaction.description}* registrada com sucesso na categoria *${categoryName}*!`);
+            delete conversationState[userIdString];
+        }
+
+      } else if (previousData.awaiting === "template_fields") {
         const { templateName } = previousData.payload;
         const fields = userMessage
           .split(",")
@@ -330,38 +366,20 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
             delete conversationState[userIdString];
           }
         }
-      } else if (previousData.awaiting === "pix_type_confirmation") {
+      } 
+      
+      
+      else if (previousData.awaiting === "pix_type_confirmation") {
         const pixType = userMessage.trim().toLowerCase();
         if (pixType !== "fiz" && pixType !== "recebi") {
           twiml.message("Por favor, responda apenas com `fiz` ou `recebi`.");
         } else {
-          const { totalAmount, counterpartName, transactionDate, category } =
-            previousData.payload;
+          const { amount, description, date, categoryId, categoryName } = previousData.payload;
           const type = pixType === "fiz" ? "expense" : "income";
-          let date = new Date(`${transactionDate}T12:00:00`);
-          if (isNaN(date.getTime())) {
-            date = new Date();
-          }
 
-          const description =
-            type === "expense"
-              ? `PIX para ${counterpartName}`
-              : `PIX de ${counterpartName}`;
-          const categoryDoc = await getOrCreateCategory(
-            userIdString,
-            category.toLowerCase()
-          );
-          const defaultPaymentMethod = await PaymentMethod.findOne({
-            type: "pix",
-          });
-
+          const defaultPaymentMethod = await PaymentMethod.findOne({ type: "pix" });
           const newTransaction = new Transaction({
-            userId: userIdString,
-            amount: totalAmount,
-            description,
-            categoryId: categoryDoc._id.toString(),
-            type,
-            date,
+            userId: userIdString, amount, description, date, categoryId, type,
             status: "completed",
             messageId: generateId(),
             paymentMethodId: defaultPaymentMethod._id.toString(),
@@ -369,17 +387,9 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
           await newTransaction.save();
 
           const updateField = type === "expense" ? "totalSpent" : "totalIncome";
-          await UserStats.findOneAndUpdate(
-            { userId: userObjectId },
-            { $inc: { [updateField]: totalAmount } },
-            { upsert: true }
-          );
+          await UserStats.findOneAndUpdate({ userId: userObjectId }, { $inc: { [updateField]: amount } }, { upsert: true });
 
-          twiml.message(
-            `✅ PIX de R$ ${totalAmount.toFixed(2)} (${
-              type === "expense" ? "enviado" : "recebido"
-            }) registrado com sucesso!`
-          );
+          twiml.message(`✅ PIX registrado com sucesso na categoria *${categoryName}*!`);
           delete conversationState[userIdString];
         }
       } else if (previousData.awaiting === "payment_status_confirmation") {
@@ -452,95 +462,36 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
 
             const result = await interpretDocumentWithAI(req.body.MediaUrl0);
 
-            switch (result.documentType) {
-              case "store_receipt": {
-                const { totalAmount, storeName, purchaseDate, category } =
-                  result.data;
-                let transactionDate = new Date(`${purchaseDate}T12:00:00`);
-                if (isNaN(transactionDate.getTime())) {
-                  transactionDate = new Date();
-                }
-
-                const description = `${storeName} - ${transactionDate.toLocaleDateString(
-                  "pt-BR"
-                )}`;
-                const categoryDoc = await getOrCreateCategory(
-                  userIdString,
-                  category.toLowerCase()
-                );
-                const defaultPaymentMethod = await PaymentMethod.findOne({
-                  type: "pix",
-                });
-
-                const newExpense = new Transaction({
-                  userId: userIdString,
-                  amount: totalAmount,
-                  description,
-                  categoryId: categoryDoc._id.toString(),
-                  type: "expense",
-                  date: transactionDate,
-                  messageId: generateId(),
-                  paymentMethodId: defaultPaymentMethod._id.toString(),
-                  status: "completed",
-                });
-                await newExpense.save();
-                await UserStats.findOneAndUpdate(
-                  { userId: userObjectId },
-                  { $inc: { totalSpent: totalAmount } }
-                );
-
-                await sendTextMessage(
-                  req.body.From,
-                  `✅ Despesa de *${storeName}* no valor de *R$ ${totalAmount.toFixed(
-                    2
-                  )}* registrada com sucesso!`
-                );
-                break;
-              }
-              case "utility_bill": {
-                const { totalAmount, provider, dueDate } = result.data;
-                const [year, month, day] = dueDate.split("-");
-                const formattedDate = `${day}/${month}/${year}`;
-
-                let confirmationMessage = `🧾 Conta identificada:\n\n`;
-                confirmationMessage += `*Empresa:* ${provider}\n*Valor:* R$ ${totalAmount.toFixed(
-                  2
-                )}\n*Vencimento:* ${formattedDate}\n\n`;
-                confirmationMessage +=
-                  "Você já pagou esta conta?\n\nResponda com `sim` ou `não`.";
-
-                conversationState[userIdString] = {
-                  awaiting: "payment_status_confirmation",
-                  payload: result.data,
-                };
-                await sendTextMessage(req.body.From, confirmationMessage);
-                break;
-              }
-              case "pix_receipt": {
-                const { totalAmount, counterpartName } = result.data;
-                let pixMessage = `🧾 PIX identificado:\n\n*Valor:* R$ ${totalAmount.toFixed(
-                  2
-                )}\n*Para/De:* ${counterpartName}\n\n`;
-                pixMessage +=
-                  "Este PIX foi um pagamento que você *FEZ* ou um valor que você *RECEBEU*?\n\nResponda `fiz` ou `recebi`.";
-
-                conversationState[userIdString] = {
-                  awaiting: "pix_type_confirmation",
-                  payload: result.data,
-                };
-                await sendTextMessage(req.body.From, pixMessage);
-                break;
-              }
-
-              default:
-                await sendTextMessage(
-                  req.body.From,
-                  "🫤 Desculpe, não consegui identificar um documento financeiro válido nesta imagem. Tente uma foto mais nítida."
-                );
-                break;
+            if (result.documentType === 'unknown' || !result.data) {
+              await sendTextMessage(req.body.From, "🫤 Desculpe, não consegui identificar um documento financeiro válido nesta imagem. Tente uma foto mais nítida.");
+              return;
             }
-          }
-          if (!isImage) {
+
+            const userCategories = await getUserCategories(userIdString);
+            let categoryMessage = "";
+            if (userCategories.length > 0) {
+              categoryMessage += "\n\n*Suas categorias:*\n- " + userCategories.join("\n- ");
+            }
+
+            conversationState[userIdString] = {
+              awaiting: "document_category_confirmation",
+              payload: { documentType: result.documentType, ...result.data }
+            };
+
+            let confirmationMessage = `🧾 Documento identificado!\n\n`;
+            const data = result.data;
+            if (result.documentType === 'store_receipt') {
+              confirmationMessage += `*Compra:* ${data.storeName}\n*Valor:* R$ ${data.totalAmount.toFixed(2)}`;
+            } else if (result.documentType === 'utility_bill') {
+              confirmationMessage += `*Conta:* ${data.provider}\n*Valor:* R$ ${data.totalAmount.toFixed(2)}`;
+            } else if (result.documentType === 'pix_receipt') {
+              confirmationMessage += `*PIX:* ${data.counterpartName}\n*Valor:* R$ ${data.totalAmount.toFixed(2)}`;
+            }
+            confirmationMessage += `\n\nEm qual categoria você gostaria de salvar?${categoryMessage}\n\n_Digite o nome de uma categoria ou crie uma nova._`;
+            
+            await sendTextMessage(req.body.From, confirmationMessage);
+            
+          }else {
             const interpretation = await interpretMessageWithAI(
               userMessage,
               new Date().toISOString()
@@ -1841,9 +1792,10 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
       }
     }
     if (!responseHasBeenSent) {
-      devLog("Resposta final do Twilio:", twiml.toString());
+      const twilioResponse = twiml.toString(); // Salva a resposta em uma variável
+      devLog("Resposta final do Twilio:", twilioResponse); // Log para depuração
       res.writeHead(200, { "Content-Type": "text/xml" });
-      res.end(twiml.toString());
+      res.end(twilioResponse); // Envia a variável
     }
   }
 });
