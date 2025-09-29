@@ -8,31 +8,42 @@ const openai = new OpenAI({
 export function sendGreetingMessage(twiml) {
   twiml.message(`👋 Olá! Sou a ADAP, sua Assistente Financeira Pessoal. Organize suas finanças de forma simples e direta, aqui mesmo no WhatsApp.
 
-Aqui estão alguns exemplos para começar:
+Confira nossa lista de comandos:
 
-Lançamentos Diários 📝
-› "25 mercado"
-› "150 uber em transporte"
-› "recebi 2000 salário"
+*1. LANÇAMENTOS MANUAIS* 📝
+ • "25 mercado"
+ • "recebi 2000 salário"
+ • "3500 celular em 10x"
 
-Compras Parceladas 💳
-› "3500 PS5 em 10x"
-› "parcelamentos ativos"
+*2. REGISTRO POR FOTO* 📸
+ • *Nota Fiscal de Loja*
+ • *Conta de Consumo (água, luz, etc.)*
+ • *Comprovante de PIX*
 
-Relatórios e Gráficos 📊
-› "gasto total"
-› "receita total em junho"
-› "onde gastei nos últimos 30 dias"
-› "quais meus gastos nos últimos 7 dias"
+*3. RELATÓRIOS E CONSULTAS* 📊
+ • "receita total" (mostra receitas, despesas e saldo)
+ • "gasto total em agosto"
+ • *Gráfico de Gastos (Barras):* "quais meus gastos nos últimos 7 dias"
+ • *Gráfico de Gastos (Pizza):* "onde gastei nos últimos 15 dias"
+ • *Gráfico de Receitas (Pizza):* "gráfico dos meus ganhos"
 
-Lembretes ⏰
-› "me lembre de pagar o aluguel dia 5"
-› "quais são meus lembretes"
+ *4. ORGANIZAÇÃO* ⏰
+ • "me lembre de pagar o aluguel dia 5"
+ • "quais são meus lembretes"
+ • "parcelamentos ativos"
 
-Para apagar algo, use o ID fornecido no registro. Por exemplo:
-› "remover gasto #a4b8c"
-› "excluir parcelamento #J-9tpH"
-› "apagar lembrete #d9bdd3"
+*5. CONTROLE DE ESTOQUE (💎 PLANO DIAMANTE)* 📦
+ • *Criar um Estoque:* "criar estoque de camisetas"
+ • *Adicionar Produto:* "adicionar camiseta"
+ • *Ver Produtos:* "ver estoque de camisetas"
+ • *Movimentar Estoque:* "vendi 2 #P0001" ou "entrada 10 #P0002"
+ • *Definir Alerta:* "alerta #P0001 para 5 unidades"
+
+*6. EXCLUIR REGISTROS* 🗑️
+Use sempre o ID (#...) fornecido na mensagem de confirmação.
+ • "remover gasto #a4b8c"
+ • "excluir parcelamento #J-9tpH"
+ • "apagar lembrete #d9bdd3"
 
 Estou aqui para simplificar seu controle financeiro. Vamos começar?`);
 }

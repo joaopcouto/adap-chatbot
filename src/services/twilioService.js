@@ -30,68 +30,64 @@ export async function sendReportImage(userId, imageUrl) {
   }
 }
 
+// Função para simular o envio de mensagem de texto no terminal
+async function logTextMessage(to, body) {
+  console.log("\n---  simulated TWILIO TEXT message ---");
+  console.log(`  TO: ${to}`);
+  console.log(`  BODY: \n${body}`);
+  console.log("-------------------------------------\n");
+  return Promise.resolve({ sid: `SIMULATED_${Date.now()}` });
+}
+
+// Função para simular o envio de template no terminal
+async function logTemplateMessage(to, contentSid, variables) {
+  console.log("\n--- simulated TWILIO TEMPLATE message ---");
+  console.log(`  TO: ${to}`);
+  console.log(`  TEMPLATE_SID: ${contentSid}`);
+  console.log('  VARIABLES:', JSON.stringify(variables, null, 2));
+  console.log("-----------------------------------------\n");
+  return Promise.resolve({ sid: `SIMULATED_${Date.now()}` });
+}
+
+export async function sendTextMessage(to, body) {
+  // Se a variável de ambiente NODE_ENV NÃO for 'prod', simula a mensagem
+  if (process.env.NODE_ENV !== 'prod') {
+    return logTextMessage(to, body);
+  }
+
+  // Se for 'prod', envia a mensagem de verdade
+  try {
+    const message = await client.messages.create({
+      from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
+      body: body,
+      to: to
+    });
+    devLog(`Mensagem de texto enviada para ${to}. SID: ${message.sid}`);
+    return message;
+  } catch (error) {
+    devLog(`Erro ao enviar mensagem de texto: ${error}`);
+    throw error;
+  }
+}
+
 export const sendTemplateMessage = async (to, contentSid, variables) => {
-    if (!client) {
-        devLog('Tentativa de enviar mensagem com o cliente Twilio não inicializado.');
-        throw new Error('Twilio client is not initialized.');
-    }
-    
-    try {
-        
-        const message = await client.messages.create({
-            contentSid: contentSid,
-            from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
-            contentVariables: JSON.stringify(variables),
-            to: to
-        });
-
-        devLog(`Template ${contentSid} enviado para ${to} com sucesso. SID: ${message.sid}`);
-        return message;
-    } catch (error) {
-        devLog(`Erro ao enviar mensagem de template via serviço: ${error}`);
-        throw error; 
-    }
+  // Se a variável de ambiente NODE_ENV NÃO for 'prod', simula a mensagem
+  if (process.env.NODE_ENV !== 'prod') {
+    return logTemplateMessage(to, contentSid, variables);
+  }
+  
+  // Se for 'prod', envia o template de verdade
+  try {
+    const message = await client.messages.create({
+      contentSid: contentSid,
+      from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
+      contentVariables: JSON.stringify(variables),
+      to: to
+    });
+    devLog(`Template ${contentSid} enviado para ${to}. SID: ${message.sid}`);
+    return message;
+  } catch (error) {
+    devLog(`Erro ao enviar mensagem de template via serviço: ${error}`);
+    throw error; 
+  }
 };
-
-export const sendTextMessage = async (to, body) => {
-    if (!client) {
-        devLog('Tentativa de enviar mensagem com o cliente Twilio não inicializado.');
-        throw new Error('Twilio client is not initialized.');
-    }
-
-    try {
-        const message = await client.messages.create({
-            from: `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`,
-            body: body,
-            to: to
-        });
-        devLog(`Mensagem de texto enviada para ${to}. SID: ${message.sid}`);
-        return message;
-    } catch (error) {
-        devLog(`Erro ao enviar mensagem de texto: ${error}`);
-        throw error;
-    }
-};
-
-
-//funções para o ambiente de testes
-export async function sendTextMessageTEST(to, body) {
-  console.log("--- MENSAGEM DE TESTE ---");
-  console.log(`DESTINO: ${to}`);
-  console.log(`CONTEÚDO:\n${body}`);
-  console.log("---------------------------\n");
-  return new Promise((resolve) => setTimeout(resolve, 100));
-}
-export async function sendTemplateMessageTEST(recipient, templateSid, variables) {
-  console.log("\n=================================================");
-  console.log("======= 🚀 SIMULAÇÃO DE ENVIO DE TEMPLATE 🚀 =======");
-  console.log("=================================================");
-  console.log(`|-> 📲 Destinatário: ${recipient}`);
-  console.log(`|-> 📄 Template SID: ${templateSid}`);
-  console.log(`|-> 📦 Variáveis:`);
-  console.log(JSON.stringify(variables, null, 2)); 
-  console.log("=================================================\n");
-
-  return Promise.resolve();
-}
-//funções para o ambiente de testes
