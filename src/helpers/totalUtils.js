@@ -42,12 +42,12 @@ function chunkLinesIntoMessages(lines) {
   return finalMessages;
 }
 
-export async function getMonthlySummary(userId, month) {
+export async function getMonthlySummary(userId, month, startDate = null, endDate = null) {
   try {
-    const totalIncome = await calculateTotalIncome(userId, month);
     
-    const totalExpenses = await calculateTotalExpenses(userId, null, month);
-
+    const totalIncome = await calculateTotalIncome(userId, month, null, startDate, endDate);
+    const totalExpenses = await calculateTotalExpenses(userId, null, month, startDate, endDate);
+    
     const balance = totalIncome - totalExpenses;
 
     return {
@@ -62,7 +62,7 @@ export async function getMonthlySummary(userId, month) {
   }
 }
 
-export async function calculateTotalIncome(userId, month = null, categoryName = null) {
+export async function calculateTotalIncome(userId, month = null, categoryName = null, startDate = null, endDate = null) {
   try {
     const pipeline = [];
     let initialMatch = {
@@ -71,20 +71,17 @@ export async function calculateTotalIncome(userId, month = null, categoryName = 
       status: { $in: ["completed", "pending"] },
     };
 
-    if (month) {
+    if (startDate && endDate) {
+      initialMatch.date = { $gte: startDate, $lte: endDate };
+    } else if (month) {
       initialMatch.$expr = {
         $eq: [
-          {
-            $dateToString: {
-              format: "%Y-%m",
-              date: "$date",
-              timezone: TIMEZONE,
-            },
-          },
+          { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } },
           month,
         ],
       };
     }
+    
     pipeline.push({ $match: initialMatch });
 
     if (categoryName) {
@@ -116,9 +113,11 @@ export async function calculateTotalIncome(userId, month = null, categoryName = 
 }
 
 export async function calculateTotalExpenses(
-  userId,
-  categoryName = null,
-  month = null
+  userId, 
+  categoryName = null, 
+  month = null, 
+  startDate = null, 
+  endDate = null
 ) {
   try {
     const matchQuery = {
@@ -144,7 +143,10 @@ export async function calculateTotalExpenses(
       endDate.setMilliseconds(endDate.getMilliseconds() - 1);
 
       matchQuery.date = { $gte: startDate, $lte: endDate };
+    } else if (startDate && endDate) {
+      matchQuery.date = { $gte: startDate, $lte: endDate };
     }
+
     const result = await Transaction.aggregate([
       { $match: matchQuery },
       { $group: { _id: null, total: { $sum: "$amount" } } },
@@ -229,7 +231,9 @@ export async function getExpenseDetails(
   userId,
   month,
   monthName,
-  categoryName
+  categoryName, 
+  startDate = null, 
+  endDate = null
 ) {
   try {
     const matchQuery = {
@@ -244,6 +248,8 @@ export async function getExpenseDetails(
       const startDate = new Date(Date.UTC(year, monthNumber - 1, 1));
       const endDate = new Date(Date.UTC(year, monthNumber, 1));
       endDate.setMilliseconds(endDate.getMilliseconds() - 1);
+      matchQuery.date = { $gte: startDate, $lte: endDate };
+    } else if (startDate && endDate) {
       matchQuery.date = { $gte: startDate, $lte: endDate };
     }
 
@@ -330,7 +336,14 @@ export async function getExpenseDetails(
   }
 }
 
-export async function getIncomeDetails(userId, month, monthName, categoryName) {
+export async function getIncomeDetails(
+  userId, 
+  month, 
+  monthName, 
+  categoryName, 
+  startDate = null, 
+  endDate = null
+) {
   try {
     let matchStage = {
       userId: userId,
@@ -345,6 +358,8 @@ export async function getIncomeDetails(userId, month, monthName, categoryName) {
           month,
         ],
       };
+    } else if (startDate && endDate) {
+      matchQuery.date = { $gte: startDate, $lte: endDate };
     }
     
     const pipeline = [

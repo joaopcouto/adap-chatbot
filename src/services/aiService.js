@@ -147,6 +147,7 @@ export async function interpretMessageWithAI(message, currentDate) {
            "days": number,
            "month": string,
            "monthName": string,
+           "period": string, // "today", "yesterday", "this_week", "last_week", "two_weeks_ago"
            "date": string,
          }
        }
@@ -161,6 +162,10 @@ export async function interpretMessageWithAI(message, currentDate) {
       Resposta: { "intent": "add_expense", "data": { "amount": 15, "description": "uber", "category": null } }
     - Usuário: "100 cofrinho inter em investimento"
       Resposta: { "intent": "add_expense", "data": { "amount": 100, "description": "cofrinho inter", "category": "investimento" } }
+    - Usuário: "Paguei 50 no almoço"
+      Resposta: { "intent": "add_expense", "data": { "amount": 50, "description": "almoço", "category": null } }
+    - Usuário: "paguei 150,00 de luz em gastos fixos"
+      Resposta: { "intent": "add_expense", "data": { "amount": 150.00, "description": "luz", "category": "gastos fixos" } }
 
     - Usuário: "Recebi 20 com freelance na categoria extras"
       Resposta: { "intent": "add_transaction_new_category", "data": { "amount": 20, "description": "freelance", "category": "extras", "type": "income" } }
@@ -199,21 +204,37 @@ export async function interpretMessageWithAI(message, currentDate) {
       Resposta: { "intent": "generate_income_category_chart", "data": { "days": 30}}
 
     - Usuário: "Qual é o meu gasto total?"
-      Resposta: { "intent": "get_total", "data": {} }
+      Resposta: { "intent": "get_total", "data": { "month": "${currentYear}-${currentMonth}", "monthName": "${monthName}" } }
     - Usuário: "Gasto total"
-      Resposta: { "intent": "get_total", "data": {} }
+      Resposta: { "intent": "get_total", "data": { "month": "${currentYear}-${currentMonth}", "monthName": "${monthName}" } }
     - Usuário: "Qual meu gasto total com lazer?"
-      Resposta: { "intent": "get_total", "data": { "category": "lazer" } }
+      Resposta: { "intent": "get_total", "data": { "category": "lazer", "month": "${currentYear}-${currentMonth}", "monthName": "${monthName}" } }
     - Usuário: "Qual meu gasto total com transporte em Janeiro?"
       Resposta: { "intent": "get_total", "data": { "category": "transporte", "month": "${currentYear}-01", "monthName": "Janeiro" } }
+    - Usuário: "gasto total outubro"
+      Resposta: { "intent": "get_total", "data": { "month": "${currentYear}-10", "monthName": "outubro" } }
     - Usuário: "Quanto gastei em fevereiro?"
       Resposta: { "intent": "get_total", "data": { "month": "${currentYear}-02", "monthName": "Fevereiro" } }
+    - Usuário: "gasto total de hoje"
+      Resposta: { "intent": "get_total", "data": { "period": "today" } }
+    - Usuário: "despesas da semana"
+      Resposta: { "intent": "get_total", "data": { "period": "this_week" } }
+    - Usuário: "gasto total da semana passada"
+      Resposta: { "intent": "get_total", "data": { "period": "last_week" } }
+    - Usuário: "gasto total da semana retrasada"
+      Resposta: { "intent": "get_total", "data": { "period": "two_weeks_ago" } }
 
+    - Usuário: "Qual é a minha receita total?"
+      Resposta: { "intent": "get_total_income", "data": { "month": "${currentYear}-${currentMonth}", "monthName": "${monthName}" } }
+    - Usuário: "receita total"
+      Resposta: { "intent": "get_total_income", "data": { "month": "${currentYear}-${currentMonth}", "monthName": "${monthName}" } }
     - Usuário: "Me mostre a receita de Renda Extra do mês de maio"  
       Resposta: { "intent": "get_total_income", "data": { "category": "Renda Extra", "month": "${currentYear}-05", "monthName": "Maio" } }
-    - Usuário: "Qual é a minha receita total?"
-      Resposta: { "intent": "get_total_income", "data": { } }
-     
+    - Usuário: "receita total de ontem"
+      Resposta: { "intent": "get_total_income", "data": { "period": "yesterday" } }
+    - Usuário: "receita total semana passada"
+      Resposta: { "intent": "get_total_income", "data": { "period": "last_week" } }
+
     - Usuário: "detalhes"
       Resposta: { "intent": "detalhes", "data": {} }
 
@@ -334,6 +355,7 @@ export async function interpretMessageWithAI(message, currentDate) {
 }
 
 export async function interpretDocumentWithAI(imageUrl) {
+
   const prompt = `Você é um especialista em analisar IMAGENS de documentos financeiros brasileiros. Sua primeira tarefa é CLASSIFICAR o tipo de documento. Depois, extrair os dados relevantes.
 
   **1. CLASSIFICAÇÃO:**
