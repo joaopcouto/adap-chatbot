@@ -21,3 +21,89 @@ export function formatInBrazilWithTime(date) {
   });
   return formattedDate.replace(" ", " às ");
 }
+
+export function getDateRangeFromPeriod(period) {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  let startDate = new Date(now);
+  let endDate = new Date(now);
+  let periodName = "";
+
+  switch (period) {
+    case "today":
+      periodName = "Hoje";
+      endDate.setHours(23, 59, 59, 999);
+      break;
+    case "yesterday":
+      periodName = "Ontem";
+      startDate.setDate(startDate.getDate() - 1);
+      endDate.setDate(endDate.getDate() - 1);
+      endDate.setHours(23, 59, 59, 999);
+      break;
+    case "this_week":
+      const currentDay = now.getDay();
+      startDate.setDate(startDate.getDate() - currentDay);
+      endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + 6);
+      endDate.setHours(23, 59, 59, 999);
+
+      const startFormatted = `${startDate
+        .getDate()
+        .toString()
+        .padStart(2, "0")}/${(startDate.getMonth() + 1)
+        .toString()
+        .padStart(2, "0")}`;
+      const endFormatted = `${endDate.getDate().toString().padStart(2, "0")}/${(
+        endDate.getMonth() + 1
+      )
+        .toString()
+        .padStart(2, "0")}`;
+      periodName = `nesta Semana (de ${startFormatted} a ${endFormatted})`;
+
+      break;
+    case "last_week":
+      const pastDay = now.getDay();
+      startDate.setDate(startDate.getDate() - pastDay - 7);
+      endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + 6);
+      endDate.setHours(23, 59, 59, 999);
+
+      const lastStartFormatted = `${startDate
+        .getDate()
+        .toString()
+        .padStart(2, "0")}/${(startDate.getMonth() + 1)
+        .toString()
+        .padStart(2, "0")}`;
+      const lastEndFormatted = `${endDate
+        .getDate()
+        .toString()
+        .padStart(2, "0")}/${(endDate.getMonth() + 1)
+        .toString()
+        .padStart(2, "0")}`;
+      periodName = `na Semana Passada (de ${lastStartFormatted} a ${lastEndFormatted})`;
+
+      break;
+    case "two_weeks_ago":
+      const dayOfWeek = now.getDay();
+      startDate.setDate(startDate.getDate() - dayOfWeek - 14);
+      endDate = new Date(startDate);
+      endDate.setDate(endDate.getDate() + 6);
+      endDate.setHours(23, 59, 59, 999);
+
+      const twoWeeksStart = `${startDate
+        .getDate()
+        .toString()
+        .padStart(2, "0")}/${(startDate.getMonth() + 1)
+        .toString()
+        .padStart(2, "0")}`;
+      const twoWeeksEnd = `${endDate.getDate().toString().padStart(2, "0")}/${(
+        endDate.getMonth() + 1
+      )
+        .toString()
+        .padStart(2, "0")}`;
+      periodName = `na Semana Retrasada (de ${twoWeeksStart} a ${twoWeeksEnd})`;
+      break;
+  }
+  return { startDate, endDate, periodName };
+}
