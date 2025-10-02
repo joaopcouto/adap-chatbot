@@ -2,9 +2,8 @@ import Transaction from "../models/Transaction.js";
 import Category from "../models/Category.js";
 import Reminder from "../models/Reminder.js";
 import { TIMEZONE, formatInBrazilWithTime } from "../utils/dateUtils.js";
-import mongoose from "mongoose";
 import InventoryTemplate from "../models/InventoryTemplate.js";
-import Product from "../models/Product.js"; 
+import Product from "../models/Product.js";
 
 const MESSAGE_LIMIT = 1550;
 
@@ -42,12 +41,28 @@ function chunkLinesIntoMessages(lines) {
   return finalMessages;
 }
 
-export async function getMonthlySummary(userId, month, startDate = null, endDate = null) {
+export async function getMonthlySummary(
+  userId,
+  month,
+  startDate = null,
+  endDate = null
+) {
   try {
-    
-    const totalIncome = await calculateTotalIncome(userId, month, null, startDate, endDate);
-    const totalExpenses = await calculateTotalExpenses(userId, null, month, startDate, endDate);
-    
+    const totalIncome = await calculateTotalIncome(
+      userId,
+      month,
+      null,
+      startDate,
+      endDate
+    );
+    const totalExpenses = await calculateTotalExpenses(
+      userId,
+      null,
+      month,
+      startDate,
+      endDate
+    );
+
     const balance = totalIncome - totalExpenses;
 
     return {
@@ -55,14 +70,19 @@ export async function getMonthlySummary(userId, month, startDate = null, endDate
       expenses: totalExpenses,
       balance: balance,
     };
-
   } catch (err) {
     console.error("Erro ao buscar o resumo mensal:", err);
     return { income: 0, expenses: 0, balance: 0 };
   }
 }
 
-export async function calculateTotalIncome(userId, month = null, categoryName = null, startDate = null, endDate = null) {
+export async function calculateTotalIncome(
+  userId,
+  month = null,
+  categoryName = null,
+  startDate = null,
+  endDate = null
+) {
   try {
     const pipeline = [];
     let initialMatch = {
@@ -76,12 +96,18 @@ export async function calculateTotalIncome(userId, month = null, categoryName = 
     } else if (month) {
       initialMatch.$expr = {
         $eq: [
-          { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } },
+          {
+            $dateToString: {
+              format: "%Y-%m",
+              date: "$date",
+              timezone: TIMEZONE,
+            },
+          },
           month,
         ],
       };
     }
-    
+
     pipeline.push({ $match: initialMatch });
 
     if (categoryName) {
@@ -113,10 +139,10 @@ export async function calculateTotalIncome(userId, month = null, categoryName = 
 }
 
 export async function calculateTotalExpenses(
-  userId, 
-  categoryName = null, 
-  month = null, 
-  startDate = null, 
+  userId,
+  categoryName = null,
+  month = null,
+  startDate = null,
   endDate = null
 ) {
   try {
@@ -136,22 +162,33 @@ export async function calculateTotalExpenses(
     }
 
     if (month) {
-      const year = parseInt(month.split("-")[0]);
-      const monthNumber = parseInt(month.split("-")[1]);
-      const startDate = new Date(Date.UTC(year, monthNumber - 1, 1, 0, 0, 0));
-      const endDate = new Date(Date.UTC(year, monthNumber, 1, 0, 0, 0));
-      endDate.setMilliseconds(endDate.getMilliseconds() - 1);
-
-      matchQuery.date = { $gte: startDate, $lte: endDate };
     } else if (startDate && endDate) {
       matchQuery.date = { $gte: startDate, $lte: endDate };
     }
 
-    const result = await Transaction.aggregate([
-      { $match: matchQuery },
-      { $group: { _id: null, total: { $sum: "$amount" } } },
-    ]);
+    const pipeline = [{ $match: matchQuery }];
 
+    if (month) {
+      pipeline.push({
+        $match: {
+          $expr: {
+            $eq: [
+              {
+                $dateToString: {
+                  format: "%Y-%m",
+                  date: "$date",
+                  timezone: TIMEZONE,
+                },
+              },
+              month,
+            ],
+          },
+        },
+      });
+    }
+
+    pipeline.push({ $group: { _id: null, total: { $sum: "$amount" } } });
+    const result = await Transaction.aggregate(pipeline);
     return result.length > 0 ? result[0].total : 0;
   } catch (err) {
     console.error("Erro ao buscar total de gastos:", err);
@@ -160,10 +197,11 @@ export async function calculateTotalExpenses(
 }
 
 export async function getExpensesReport(userId, days) {
-  const startDate = new Date();
-  startDate.setDate(startDate.getDate() - (days - 1));
+  const nowInBrazil = toZonedTime(new Date(), TIMEZONE);
+  nowInBrazil.setHours(0, 0, 0, 0);
 
-  startDate.setHours(0, 0, 0, 0);
+  const startDate = new Date(nowInBrazil);
+  startDate.setDate(startDate.getDate() - (days - 1));
 
   return Transaction.aggregate([
     {
@@ -231,8 +269,8 @@ export async function getExpenseDetails(
   userId,
   month,
   monthName,
-  categoryName, 
-  startDate = null, 
+  categoryName,
+  startDate = null,
   endDate = null
 ) {
   try {
@@ -259,66 +297,83 @@ export async function getExpenseDetails(
         name: { $regex: new RegExp(`^${categoryName.trim()}$`, "i") },
       });
       if (!category) {
-        return { messages: ["Nenhum gasto encontrado para esta categoria."], transactionIds: [] };
+        return {
+          messages: ["Nenhum gasto encontrado para esta categoria."],
+          transactionIds: [],
+        };
       }
       matchQuery.categoryId = category._id.toString();
     }
-    
+
     const expenses = await Transaction.aggregate([
       { $match: matchQuery },
       {
         $addFields: {
-          convertedCategoryId: { $toObjectId: "$categoryId" }
-        }
+          convertedCategoryId: { $toObjectId: "$categoryId" },
+        },
       },
       {
         $lookup: {
-          from: "categories", 
+          from: "categories",
           localField: "convertedCategoryId",
           foreignField: "_id",
-          as: "categoryDetails" 
-        }
+          as: "categoryDetails",
+        },
       },
       {
         $unwind: {
           path: "$categoryDetails",
-          preserveNullAndEmptyArrays: true 
-        }
+          preserveNullAndEmptyArrays: true,
+        },
       },
-      { $sort: { 'categoryDetails.name': 1, date: 1 } }
+      { $sort: { "categoryDetails.name": 1, date: 1 } },
     ]);
 
-
     if (expenses.length === 0) {
-      return { messages: ["Nenhum gasto encontrado para este período."], transactionIds: [] };
+      return {
+        messages: ["Nenhum gasto encontrado para este período."],
+        transactionIds: [],
+      };
     }
 
     const bodyLines = [];
     const transactionIds = [];
     let itemCounter = 1;
-    let currentCategoryName = '';
+    let currentCategoryName = "";
 
     for (const expense of expenses) {
-      const categoryDisplay = expense.categoryDetails && expense.categoryDetails.name
-        ? expense.categoryDetails.name.charAt(0).toUpperCase() + expense.categoryDetails.name.slice(1)
-        : 'Outro';
+      const categoryDisplay =
+        expense.categoryDetails && expense.categoryDetails.name
+          ? expense.categoryDetails.name.charAt(0).toUpperCase() +
+            expense.categoryDetails.name.slice(1)
+          : "Outro";
 
       if (!categoryName && categoryDisplay !== currentCategoryName) {
-        const prefix = currentCategoryName === '' ? '' : '\n'; 
-        
+        const prefix = currentCategoryName === "" ? "" : "\n";
+
         bodyLines.push(`${prefix}📁 ${categoryDisplay}`);
         currentCategoryName = categoryDisplay;
       }
 
-      const amount = expense.amount != null ? expense.amount.toFixed(2) : "0.00";
+      const amount =
+        expense.amount != null ? expense.amount.toFixed(2) : "0.00";
       bodyLines.push(`${itemCounter}. ${expense.description}: R$ ${amount}`);
       transactionIds.push(expense._id.toString());
       itemCounter++;
     }
 
-    const header = categoryName
-      ? `🧾 Detalhes dos gastos em _*${categoryName}*_ no mês de _*${monthName}*:`
-      : `🧾 Detalhes de todos os gastos no mês de _*${monthName}*_:`;
+    let header;
+    const periodName = monthName
+      ? `no mês de ${monthName}`
+      : startDate && endDate
+      ? `no período selecionado`
+      : "";
+
+    if (categoryName) {
+      header = `🧾 Detalhes dos gastos em _*${categoryName}*_ ${periodName}:`;
+    } else {
+      header = `🧾 Detalhes de todos os gastos ${periodName}:`;
+    }
 
     const linesToChunk = [header, ...bodyLines];
     const messageChunks = chunkLinesIntoMessages(linesToChunk);
@@ -329,19 +384,21 @@ export async function getExpenseDetails(
     }
 
     return { messages: messageChunks, transactionIds: transactionIds };
-
   } catch (error) {
     console.error("Erro ao buscar despesas por categoria:", error);
-    return { messages: ["Ocorreu um erro ao buscar os gastos. Tente novamente."], transactionIds: [] };
+    return {
+      messages: ["Ocorreu um erro ao buscar os gastos. Tente novamente."],
+      transactionIds: [],
+    };
   }
 }
 
 export async function getIncomeDetails(
-  userId, 
-  month, 
-  monthName, 
-  categoryName, 
-  startDate = null, 
+  userId,
+  month,
+  monthName,
+  categoryName,
+  startDate = null,
   endDate = null
 ) {
   try {
@@ -354,14 +411,20 @@ export async function getIncomeDetails(
     if (month) {
       matchStage.$expr = {
         $eq: [
-          { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } },
+          {
+            $dateToString: {
+              format: "%Y-%m",
+              date: "$date",
+              timezone: TIMEZONE,
+            },
+          },
           month,
         ],
       };
     } else if (startDate && endDate) {
       matchQuery.date = { $gte: startDate, $lte: endDate };
     }
-    
+
     const pipeline = [
       { $match: matchStage },
       { $addFields: { convertedCategoryId: { $toObjectId: "$categoryId" } } },
@@ -370,46 +433,53 @@ export async function getIncomeDetails(
           from: "categories",
           localField: "convertedCategoryId",
           foreignField: "_id",
-          as: "categoryDetails"
-        }
+          as: "categoryDetails",
+        },
       },
       {
         $unwind: {
           path: "$categoryDetails",
-          preserveNullAndEmptyArrays: true
-        }
-      }
+          preserveNullAndEmptyArrays: true,
+        },
+      },
     ];
 
     if (categoryName) {
       pipeline.push({
         $match: {
-          "categoryDetails.name": { $regex: new RegExp(`^${categoryName.trim()}$`, "i") },
+          "categoryDetails.name": {
+            $regex: new RegExp(`^${categoryName.trim()}$`, "i"),
+          },
         },
       });
     }
 
-    pipeline.push({ $sort: { 'categoryDetails.name': 1, date: 1 } });
+    pipeline.push({ $sort: { "categoryDetails.name": 1, date: 1 } });
 
     const incomes = await Transaction.aggregate(pipeline);
 
     if (incomes.length === 0) {
-      return { messages: ["Nenhuma receita encontrada para este período."], transactionIds: [] };
+      return {
+        messages: ["Nenhuma receita encontrada para este período."],
+        transactionIds: [],
+      };
     }
 
     const bodyLines = [];
     const transactionIds = [];
     let itemCounter = 1;
-    let currentCategoryName = '';
+    let currentCategoryName = "";
 
     for (const income of incomes) {
-      const categoryDisplay = income.categoryDetails && income.categoryDetails.name
-        ? income.categoryDetails.name.charAt(0).toUpperCase() + income.categoryDetails.name.slice(1)
-        : 'Outro';
+      const categoryDisplay =
+        income.categoryDetails && income.categoryDetails.name
+          ? income.categoryDetails.name.charAt(0).toUpperCase() +
+            income.categoryDetails.name.slice(1)
+          : "Outro";
 
       if (!categoryName && categoryDisplay !== currentCategoryName) {
-        const prefix = currentCategoryName === '' ? '' : '\n';
-        
+        const prefix = currentCategoryName === "" ? "" : "\n";
+
         bodyLines.push(`${prefix}📁 ${categoryDisplay}`);
         currentCategoryName = categoryDisplay;
       }
@@ -419,10 +489,19 @@ export async function getIncomeDetails(
       transactionIds.push(income._id.toString());
       itemCounter++;
     }
-    
-    const header = categoryName
-      ? `🧾 Detalhes das receitas de _*${categoryName}*_ no mês de _*${monthName}*:`
-      : `🧾 Detalhes de todas as receitas no mês de _*${monthName}*_:`;
+
+    let header;
+    const periodName = monthName
+      ? `no mês de ${monthName}`
+      : startDate && endDate
+      ? `no período selecionado`
+      : "";
+
+    if (categoryName) {
+      header = `🧾 Detalhes das receitas em _*${categoryName}*_ ${periodName}:`;
+    } else {
+      header = `🧾 Detalhes de todas as receitas ${periodName}:`;
+    }
 
     const linesToChunk = [header, ...bodyLines];
     const messageChunks = chunkLinesIntoMessages(linesToChunk);
@@ -433,12 +512,13 @@ export async function getIncomeDetails(
     }
 
     return { messages: messageChunks, transactionIds: transactionIds };
-    
   } catch (error) {
     console.error("Erro ao buscar detalhes das receitas:", error);
     return {
-      messages: ["Ocorreu um erro ao buscar os detalhes das receitas. Tente novamente."],
-      transactionIds: []
+      messages: [
+        "Ocorreu um erro ao buscar os detalhes das receitas. Tente novamente.",
+      ],
+      transactionIds: [],
     };
   }
 }
@@ -468,7 +548,7 @@ export async function getIncomeByCategoryReport(userId, days) {
     {
       $match: {
         userId,
-        type: "income", 
+        type: "income",
         date: { $gte: startDate },
         status: { $in: ["completed", "pending"] },
       },
@@ -605,38 +685,54 @@ export async function getActiveInstallments(userId) {
 export async function getFormattedInventory(userId, templateName) {
   const template = await InventoryTemplate.findOne({
     userId: userId,
-    templateName: { $regex: new RegExp(`^${templateName.toLowerCase()}`, "i") }
+    templateName: { $regex: new RegExp(`^${templateName.toLowerCase()}`, "i") },
   });
 
   if (!template) {
-    return { messages: [`Não encontrei um estoque chamado *${templateName}*. Para ver seus estoques, diga "listar estoques".`] };
+    return {
+      messages: [
+        `Não encontrei um estoque chamado *${templateName}*. Para ver seus estoques, diga "listar estoques".`,
+      ],
+    };
   }
 
   const products = await Product.find({
     userId: userId,
-    templateId: template._id
-  }).sort({ 'attributes.Nome': 1 }); 
+    templateId: template._id,
+  }).sort({ "attributes.Nome": 1 });
 
   if (products.length === 0) {
-    return { messages: [`Você ainda não tem nenhum item no estoque *${template.templateName}*. Para adicionar, diga "adicionar ${template.templateName}".`] };
+    return {
+      messages: [
+        `Você ainda não tem nenhum item no estoque *${template.templateName}*. Para adicionar, diga "adicionar ${template.templateName}".`,
+      ],
+    };
   }
 
-  const header = `📦 *Estoque de ${template.templateName.charAt(0).toUpperCase() + template.templateName.slice(1)}:*\n\n`;
+  const header = `📦 *Estoque de ${
+    template.templateName.charAt(0).toUpperCase() +
+    template.templateName.slice(1)
+  }:*\n\n`;
   let chunks = [];
   let currentChunk = "";
 
   products.forEach((product, index) => {
     const descriptionParts = [];
-    template.fields.forEach(field => {
+    template.fields.forEach((field) => {
       if (product.attributes.has(field)) {
         descriptionParts.push(product.attributes.get(field));
       }
     });
     const description = descriptionParts.join(" ");
-    
+
     const productLine = `🆔 *#${product.customId}* - ${description}\n   - *Quantidade:* ${product.quantity}\n   - *Alerta em:* ${product.minStockLevel} unidades\n\n`;
 
-    if ( (index === 0 ? header.length : 0) + currentChunk.length + productLine.length > MESSAGE_LIMIT) {
+    if (
+      (index === 0 ? header.length : 0) +
+        currentChunk.length +
+        productLine.length >
+      MESSAGE_LIMIT
+    ) {
       chunks.push(currentChunk);
       currentChunk = productLine;
     } else {
@@ -644,19 +740,22 @@ export async function getFormattedInventory(userId, templateName) {
     }
   });
 
-  chunks.push(currentChunk); 
+  chunks.push(currentChunk);
 
   const finalMessages = chunks.map((chunk, index) => {
     if (index === 0) {
-      return header + chunk; 
+      return header + chunk;
     }
     return chunk;
   });
-  
+
   const footer = `\nPara movimentar o estoque, use o ID. Ex: "vendi 2 #${products[0].customId}"`;
-  
-  if (finalMessages[finalMessages.length-1].length + footer.length <= MESSAGE_LIMIT){
-    finalMessages[finalMessages.length-1] += footer;
+
+  if (
+    finalMessages[finalMessages.length - 1].length + footer.length <=
+    MESSAGE_LIMIT
+  ) {
+    finalMessages[finalMessages.length - 1] += footer;
   } else {
     finalMessages.push(footer);
   }
@@ -666,5 +765,7 @@ export async function getFormattedInventory(userId, templateName) {
 
 export async function getUserCategories(userId) {
   const categories = await Category.find({ userId: userId }).lean();
-  return categories.map(c => c.name.charAt(0).toUpperCase() + c.name.slice(1));
+  return categories.map(
+    (c) => c.name.charAt(0).toUpperCase() + c.name.slice(1)
+  );
 }
