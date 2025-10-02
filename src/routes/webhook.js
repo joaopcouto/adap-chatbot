@@ -3,8 +3,7 @@ import twilio from "twilio";
 import { sendTextMessage } from "../services/twilioService.js";
 import { devLog } from "../helpers/logger.js";
 import { generateCorrelationId } from "../helpers/logger.js";
-import User from "../models/User.js";
-import { fromZonedTime } from "date-fns-tz";
+import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import { TIMEZONE, getDateRangeFromPeriod } from "../utils/dateUtils.js";
 
 import {
@@ -165,12 +164,13 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
 
         const transactionDetails = {
           amount: data.totalAmount,
-          date: new Date(
-            data.purchaseDate ||
-              data.transactionDate ||
-              data.dueDate ||
-              Date.now()
-          ),
+          date: data.purchaseDate
+            ? new Date(`${data.purchaseDate}T12:00:00Z`)
+            : data.transactionDate
+            ? new Date(`${data.transactionDate}T12:00:00Z`)
+            : data.dueDate
+            ? new Date(`${data.dueDate}T12:00:00Z`)
+            : toZonedTime(new Date(), TIMEZONE),
           description:
             data.storeName ||
             data.provider ||
@@ -437,7 +437,9 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
             previousData.payload;
 
           const status = hasPaid ? "completed" : "pending";
-          const date = hasPaid ? new Date() : new Date(`${dueDate}T12:00:00`);
+          const date = hasPaid
+            ? toZonedTime(new Date(), TIMEZONE)
+            : new Date(`${dueDate}T12:00:00Z`);
           const description = `Conta ${provider}`;
 
           const categoryDoc = await getOrCreateCategory(
@@ -637,7 +639,7 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                   description,
                   categoryId: categoryDoc._id.toString(),
                   type: "income",
-                  date: new Date(),
+                  date: toZonedTime(new Date(), TIMEZONE),
                   messageId: generateId(),
                   paymentMethodId: defaultPaymentMethod._id.toString(),
                   status: "completed",
@@ -695,7 +697,7 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                   description,
                   categoryId: categoryDoc._id.toString(),
                   type: "expense",
-                  date: new Date(),
+                  date: toZonedTime(new Date(), TIMEZONE),
                   messageId: generateId(),
                   paymentMethodId: defaultPaymentMethod._id.toString(),
                   status: "completed",
@@ -789,7 +791,7 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                   description: newDescription,
                   categoryId: categoryDoc._id.toString(),
                   type: newType,
-                  date: new Date(),
+                  date: toZonedTime(new Date(), TIMEZONE),
                   messageId: generateId(),
                   paymentMethodId: defaultPaymentMethod._id.toString(),
                   status: "completed",

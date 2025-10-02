@@ -113,7 +113,7 @@ export async function interpretMessageWithAI(message, currentDate) {
     - Regra de Categoria: Se a categoria fornecida NÃO estiver na lista de categorias válidas, a intenção DEVE ser "add_transaction_new_category".
       - Categorias válidas (despesa): "gastos fixos", "lazer", "investimento", "conhecimento", "doação"
       - Categorias válidas (receita): "Salário", "Renda Extra"
-
+    - Regra de Período: Para as intenções "get_total" e "get_total_income", o campo 'period' SÓ PODE ter um dos seguintes valores: "today", "yesterday", "this_week", "last_week", "two_weeks_ago". Se o usuário pedir um período diferente (ex: "semana antepassada", "dia 15"), o campo 'period' DEVE ser nulo (null). **Ignore pedidos para dias específicos (ex: "dia 18") não os associando a um mês.**
 
   3. Regras de Validação e Categorização:
     - Se a categoria não for especificada, determine-a com base na descrição usando as categorias válidas.
@@ -205,20 +205,12 @@ export async function interpretMessageWithAI(message, currentDate) {
 
     - Usuário: "Qual é o meu gasto total?"
       Resposta: { "intent": "get_total", "data": { "month": "${currentYear}-${currentMonth}", "monthName": "${monthName}" } }
-    - Usuário: "Gasto total"
-      Resposta: { "intent": "get_total", "data": { "month": "${currentYear}-${currentMonth}", "monthName": "${monthName}" } }
-    - Usuário: "Qual meu gasto total com lazer?"
-      Resposta: { "intent": "get_total", "data": { "category": "lazer", "month": "${currentYear}-${currentMonth}", "monthName": "${monthName}" } }
     - Usuário: "Qual meu gasto total com transporte em Janeiro?"
       Resposta: { "intent": "get_total", "data": { "category": "transporte", "month": "${currentYear}-01", "monthName": "Janeiro" } }
     - Usuário: "gasto total outubro"
       Resposta: { "intent": "get_total", "data": { "month": "${currentYear}-10", "monthName": "outubro" } }
-    - Usuário: "Quanto gastei em fevereiro?"
-      Resposta: { "intent": "get_total", "data": { "month": "${currentYear}-02", "monthName": "Fevereiro" } }
     - Usuário: "gasto total de hoje"
       Resposta: { "intent": "get_total", "data": { "period": "today" } }
-    - Usuário: "despesas da semana"
-      Resposta: { "intent": "get_total", "data": { "period": "this_week" } }
     - Usuário: "gasto total da semana passada"
       Resposta: { "intent": "get_total", "data": { "period": "last_week" } }
     - Usuário: "gasto total da semana retrasada"
@@ -226,14 +218,12 @@ export async function interpretMessageWithAI(message, currentDate) {
 
     - Usuário: "Qual é a minha receita total?"
       Resposta: { "intent": "get_total_income", "data": { "month": "${currentYear}-${currentMonth}", "monthName": "${monthName}" } }
-    - Usuário: "receita total"
-      Resposta: { "intent": "get_total_income", "data": { "month": "${currentYear}-${currentMonth}", "monthName": "${monthName}" } }
     - Usuário: "Me mostre a receita de Renda Extra do mês de maio"  
       Resposta: { "intent": "get_total_income", "data": { "category": "Renda Extra", "month": "${currentYear}-05", "monthName": "Maio" } }
     - Usuário: "receita total de ontem"
       Resposta: { "intent": "get_total_income", "data": { "period": "yesterday" } }
-    - Usuário: "receita total semana passada"
-      Resposta: { "intent": "get_total_income", "data": { "period": "last_week" } }
+    - Usuário: "receita da semana"
+      Resposta: { "intent": "get_total_income", "data": { "period": "this_week" } }
 
     - Usuário: "detalhes"
       Resposta: { "intent": "detalhes", "data": {} }

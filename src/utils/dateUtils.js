@@ -1,4 +1,4 @@
-import { format, formatInTimeZone } from "date-fns-tz";
+import { formatInTimeZone, toZonedTime } from "date-fns-tz";
 import ptBR from "date-fns/locale/pt-BR";
 
 export const TIMEZONE = "America/Sao_Paulo";
@@ -23,11 +23,12 @@ export function formatInBrazilWithTime(date) {
 }
 
 export function getDateRangeFromPeriod(period) {
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
+  const nowInBrazil = toZonedTime(new Date(), TIMEZONE);
+  nowInBrazil.setHours(0, 0, 0, 0);
 
-  let startDate = new Date(now);
-  let endDate = new Date(now);
+  let startDate = new Date(nowInBrazil);
+  let endDate = new Date(nowInBrazil);
+
   let periodName = "";
 
   switch (period) {
@@ -42,7 +43,7 @@ export function getDateRangeFromPeriod(period) {
       endDate.setHours(23, 59, 59, 999);
       break;
     case "this_week":
-      const currentDay = now.getDay();
+      const currentDay = nowInBrazil.getDay();
       startDate.setDate(startDate.getDate() - currentDay);
       endDate = new Date(startDate);
       endDate.setDate(endDate.getDate() + 6);
@@ -59,11 +60,12 @@ export function getDateRangeFromPeriod(period) {
       )
         .toString()
         .padStart(2, "0")}`;
+
       periodName = `nesta Semana (de ${startFormatted} a ${endFormatted})`;
 
       break;
     case "last_week":
-      const pastDay = now.getDay();
+      const pastDay = nowInBrazil.getDay();
       startDate.setDate(startDate.getDate() - pastDay - 7);
       endDate = new Date(startDate);
       endDate.setDate(endDate.getDate() + 6);
@@ -81,11 +83,12 @@ export function getDateRangeFromPeriod(period) {
         .padStart(2, "0")}/${(endDate.getMonth() + 1)
         .toString()
         .padStart(2, "0")}`;
+
       periodName = `na Semana Passada (de ${lastStartFormatted} a ${lastEndFormatted})`;
 
       break;
     case "two_weeks_ago":
-      const dayOfWeek = now.getDay();
+      const dayOfWeek = nowInBrazil.getDay();
       startDate.setDate(startDate.getDate() - dayOfWeek - 14);
       endDate = new Date(startDate);
       endDate.setDate(endDate.getDate() + 6);
@@ -102,6 +105,7 @@ export function getDateRangeFromPeriod(period) {
       )
         .toString()
         .padStart(2, "0")}`;
+
       periodName = `na Semana Retrasada (de ${twoWeeksStart} a ${twoWeeksEnd})`;
       break;
   }
