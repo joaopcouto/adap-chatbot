@@ -1030,55 +1030,87 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                 }
                 break;
               }
-              case "get_total": {
+
+              case "get_total":
+              case "get_total_income": {
                 let { category, month, monthName, period } =
                   interpretation.data;
                 let startDate, endDate, periodName;
 
-                if (period) {
-                  const range = getDateRangeFromPeriod(period);
-                  startDate = range.startDate;
-                  endDate = range.endDate;
-                  periodName = range.periodName;
-                } else if (month) {
-                  periodName = `no mês de ${monthName}`;
-                } else {
+                const validPeriods = [
+                  "today",
+                  "yesterday",
+                  "this_week",
+                  "last_week",
+                  "two_weeks_ago",
+                ];
+
+                if (period && !validPeriods.includes(period)) {
+                  period = null; 
+                }
+
+                if (!period && !month) {
                   twiml.message(
                     "🤔 Não entendi o período. Você pode pedir o total para:\n- Hoje\n- Ontem\n- Esta semana\n- Semana passada\n- Semana retrasada\n- Um mês específico (ex: 'gasto total em agosto')"
                   );
                   break;
                 }
 
-                const total = await calculateTotalExpenses(
-                  userIdString,
-                  category,
-                  month,
-                  startDate,
-                  endDate
-                );
+                if (period) {
+                  const range = getDateRangeFromPeriod(period);
+                  startDate = range.startDate;
+                  endDate = range.endDate;
+                  periodName = range.periodName;
+                } else {
+                  periodName = `no mês de ${monthName}`;
+                }
+
+                const isIncome = interpretation.intent === "get_total_income";
+
+                const total = isIncome
+                  ? await calculateTotalIncome(
+                      userIdString,
+                      month,
+                      category,
+                      startDate,
+                      endDate
+                    )
+                  : await calculateTotalExpenses(
+                      userIdString,
+                      category,
+                      month,
+                      startDate,
+                      endDate
+                    );
 
                 if (total === 0) {
-                  let zeroMessage = `🎉 Você não tem gastos registrados ${periodName}`;
+                  let zeroMessage = `🤷‍♀️ Nenhuma movimentação registrada ${periodName}.`;
                   if (category) {
                     const catFormatted =
                       category.charAt(0).toUpperCase() + category.slice(1);
-                    zeroMessage = `🎉 Você não tem gastos na categoria _*${catFormatted}*_ ${periodName}.`;
+                    zeroMessage = `🤷‍♀️ Nenhum(a) ${
+                      isIncome ? "receita" : "gasto"
+                    } na categoria _*${catFormatted}*_ ${periodName}.`;
                   }
                   twiml.message(zeroMessage);
                 } else {
-                  let responseMessage = `📉 *Gasto total* ${periodName}: \nR$ ${total.toFixed(
+                  const typeText = isIncome ? "Receita total" : "Gasto total";
+                  const icon = isIncome ? "📈" : "📉";
+
+                  let responseMessage = `${icon} *${typeText}* ${periodName}: \nR$ ${total.toFixed(
                     2
                   )}`;
                   if (category) {
                     const catFormatted =
                       category.charAt(0).toUpperCase() + category.slice(1);
-                    responseMessage = `📉 *Gasto total* em _*${catFormatted}*_ ${periodName}: \nR$ ${total.toFixed(
+                    responseMessage = `${icon} *${typeText}* em _*${catFormatted}*_ ${periodName}: \nR$ ${total.toFixed(
                       2
                     )}`;
                   }
-                  responseMessage += `.\n\nDigite "detalhes" para ver a lista de itens.`;
+
+                  responseMessage += `\n\nDigite "detalhes" para ver a lista de itens.`;
                   conversationState[userIdString] = {
-                    type: "expense",
+                    type: isIncome ? "income" : "expense",
                     category,
                     month,
                     monthName,
@@ -1090,26 +1122,7 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                 }
                 break;
               }
-              case "get_total_income": {
-                let { category, month, monthName, period } =
-                  interpretation.data;
-                let startDate, endDate, periodName;
-
-                if (period) {
-                  const range = getDateRangeFromPeriod(period);
-                  startDate = range.startDate;
-                  endDate = range.endDate;
-                  periodName = range.periodName;
-                  month = null;
-                } else if (month) {
-                  periodName = `no mês de ${monthName}`;
-                } else {
-                  twiml.message(
-                    "🤔 Não entendi o período. Você pode pedir o total para:\n- Hoje\n- Ontem\n- Esta semana\n- Semana passada\n- Semana retrasada\n- Um mês específico (ex: 'receita total em agosto')"
-                  );
-                  break;
-                }
-
+              case "get_balance": {
                 const now = new Date();
                 const currentMonthCode = `${now.getFullYear()}-${String(
                   now.getMonth() + 1
@@ -1120,82 +1133,18 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                     .charAt(0)
                     .toUpperCase() +
                   now.toLocaleString("pt-BR", { month: "long" }).slice(1);
-                const currentMonthSummary = await getMonthlySummary(
+
+                const summary = await getMonthlySummary(
                   userIdString,
                   currentMonthCode
                 );
 
-                if (category) {
-                  const totalIncomeCategory = await calculateTotalIncome(
-                    userIdString,
-                    month,
-                    category,
-                    startDate,
-                    endDate
-                  );
-                  if (totalIncomeCategory === 0) {
-                    const catFormatted =
-                      category.charAt(0).toUpperCase() + category.slice(1);
-                    twiml.message(
-                      `🤷‍♀️ Nenhuma receita registrada na categoria _*${catFormatted}*_ ${periodName}.`
-                    );
-                  } else {
-                    const catFormatted =
-                      category.charAt(0).toUpperCase() + category.slice(1);
-                    let responseMessage = `📈 *Receita total* de _*${catFormatted}*_ ${periodName}: \nR$ ${totalIncomeCategory.toFixed(
-                      2
-                    )}`;
-                    responseMessage += `.\n\nDigite "detalhes" para ver a lista de itens.`;
-                    conversationState[userIdString] = {
-                      type: "income",
-                      category,
-                      month,
-                      monthName,
-                      startDate,
-                      endDate,
-                      periodName,
-                    };
-                    twiml.message(responseMessage);
-                  }
-                } else {
-                  const periodSummary = await getMonthlySummary(
-                    userIdString,
-                    month,
-                    startDate,
-                    endDate
-                  );
-                  if (
-                    periodSummary.income === 0 &&
-                    periodSummary.expenses === 0
-                  ) {
-                    twiml.message(
-                      `🤷‍♀️ Nenhuma movimentação registrada ${periodName}.`
-                    );
-                  } else {
-                    let responseMessage = `🧾 *Resumo Financeiro ${periodName}*\n\n`;
-                    responseMessage += `📈 *Receita Total:* R$ ${periodSummary.income.toFixed(
-                      2
-                    )}\n`;
-                    responseMessage += `📉 *Despesa Total:* R$ ${periodSummary.expenses.toFixed(
-                      2
-                    )}\n\n`;
-                    const balancePrefix =
-                      currentMonthSummary.balance >= 0 ? "💰" : "⚠️";
-                    responseMessage += `${balancePrefix} *Saldo de ${currentMonthName}:* *R$ ${currentMonthSummary.balance.toFixed(
-                      2
-                    )}*`;
-                    responseMessage += `\n\nDigite "detalhes" para ver a lista de receitas.`;
-                    conversationState[userIdString] = {
-                      type: "income",
-                      month,
-                      monthName,
-                      startDate,
-                      endDate,
-                      periodName,
-                    };
-                    twiml.message(responseMessage);
-                  }
-                }
+                const balancePrefix = summary.balance >= 0 ? "💰" : "⚠️";
+                const balanceMessage = `${balancePrefix} *Saldo de ${currentMonthName}:* *R$ ${summary.balance.toFixed(
+                  2
+                )}*`;
+
+                twiml.message(balanceMessage);
                 break;
               }
               case "detalhes": {
@@ -1229,7 +1178,8 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                     monthName,
                     category,
                     startDate,
-                    endDate
+                    endDate,
+                    periodName
                   );
                 } else {
                   result = await getExpenseDetails(
@@ -1238,7 +1188,8 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                     monthName,
                     category,
                     startDate,
-                    endDate
+                    endDate,
+                    periodName
                   );
                 }
 

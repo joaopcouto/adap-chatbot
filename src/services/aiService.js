@@ -80,6 +80,7 @@ export async function interpretMessageWithAI(message, currentDate) {
       "generate_income_category_chart" → O usuário quer gerar um gráfico de receitas por categoria. Extraia os dias.
       "get_total_income" → O usuário quer recuperar o valor total de receitas.
       "get_total" → O usuário quer recuperar o valor total gasto ou recebido para um mês específico, ou o mês atual, opcionalmente filtrado por uma categoria específica.
+      "get_balance" → O usuário quer ver o saldo do mês atual.
       "get_active_installments" → O usuário quer uma lista de todos os seus planos de parcelamento ativos.
       "detalhes" → O usuário quer mostrar uma lista de todos os itens em uma determinada data"
       "greeting" → O usuário envia uma saudação (ex: "Oi", "Olá").
@@ -113,7 +114,11 @@ export async function interpretMessageWithAI(message, currentDate) {
     - Regra de Categoria: Se a categoria fornecida NÃO estiver na lista de categorias válidas, a intenção DEVE ser "add_transaction_new_category".
       - Categorias válidas (despesa): "gastos fixos", "lazer", "investimento", "conhecimento", "doação"
       - Categorias válidas (receita): "Salário", "Renda Extra"
-    - Regra de Período: Para as intenções "get_total" e "get_total_income", o campo 'period' SÓ PODE ter um dos seguintes valores: "today", "yesterday", "this_week", "last_week", "two_weeks_ago". Se o usuário pedir um período diferente (ex: "semana antepassada", "dia 15"), o campo 'period' DEVE ser nulo (null). **Ignore pedidos para dias específicos (ex: "dia 18") não os associando a um mês.**
+    - Regra de Período: Para as intenções "get_total" e "get_total_income", o usuário pode especificar um 'period' ou um 'month'.
+      - O campo 'period' SÓ PODE ter um dos seguintes valores: "today", "yesterday", "this_week", "last_week", "two_weeks_ago".
+      - O campo 'month' é usado se o usuário mencionar um nome de mês (ex: "janeiro", "agosto").
+      - Se o usuário pedir um período inválido (ex: "semana antepassada", "dia 15"), os campos 'period' e 'month' DEVEM ser nulos. Não tente corrigir ou adivinhar.
+
 
   3. Regras de Validação e Categorização:
     - Se a categoria não for especificada, determine-a com base na descrição usando as categorias válidas.
@@ -224,6 +229,11 @@ export async function interpretMessageWithAI(message, currentDate) {
       Resposta: { "intent": "get_total_income", "data": { "period": "yesterday" } }
     - Usuário: "receita da semana"
       Resposta: { "intent": "get_total_income", "data": { "period": "this_week" } }
+  
+    - Usuário: "ver saldo"
+      Resposta: { "intent": "get_balance", "data": {} }
+    - Usuário: "qual meu saldo?"
+      Resposta: { "intent": "get_balance", "data": {} }
 
     - Usuário: "detalhes"
       Resposta: { "intent": "detalhes", "data": {} }

@@ -41,74 +41,35 @@ function chunkLinesIntoMessages(lines) {
   return finalMessages;
 }
 
-export async function getMonthlySummary(
-  userId,
-  month,
-  startDate = null,
-  endDate = null
-) {
+export async function getMonthlySummary(userId, month, startDate = null, endDate = null) {
   try {
-    const totalIncome = await calculateTotalIncome(
-      userId,
-      month,
-      null,
-      startDate,
-      endDate
-    );
-    const totalExpenses = await calculateTotalExpenses(
-      userId,
-      null,
-      month,
-      startDate,
-      endDate
-    );
-
+    const totalIncome = await calculateTotalIncome(userId, month, null, startDate, endDate);
+    const totalExpenses = await calculateTotalExpenses(userId, null, month, startDate, endDate);
     const balance = totalIncome - totalExpenses;
-
-    return {
-      income: totalIncome,
-      expenses: totalExpenses,
-      balance: balance,
-    };
+    return { income: totalIncome, expenses: totalExpenses, balance: balance };
   } catch (err) {
     console.error("Erro ao buscar o resumo mensal:", err);
     return { income: 0, expenses: 0, balance: 0 };
   }
 }
 
-export async function calculateTotalIncome(
-  userId,
-  month = null,
-  categoryName = null,
-  startDate = null,
-  endDate = null
-) {
+export async function calculateTotalIncome(userId, month = null, categoryName = null, startDate = null, endDate = null) {
   try {
     const pipeline = [];
-    let initialMatch = {
+    const matchQuery = {
       userId: userId,
       type: "income",
       status: { $in: ["completed", "pending"] },
     };
 
     if (startDate && endDate) {
-      initialMatch.date = { $gte: startDate, $lte: endDate };
-    } else if (month) {
-      initialMatch.$expr = {
-        $eq: [
-          {
-            $dateToString: {
-              format: "%Y-%m",
-              date: "$date",
-              timezone: TIMEZONE,
-            },
-          },
-          month,
-        ],
-      };
+      matchQuery.date = { $gte: startDate, $lte: endDate };
     }
+    pipeline.push({ $match: matchQuery });
 
-    pipeline.push({ $match: initialMatch });
+    if (month) {
+      pipeline.push({ $match: { $expr: { $eq: [ { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } }, month ] } } });
+    }
 
     if (categoryName) {
       pipeline.push({
@@ -138,53 +99,22 @@ export async function calculateTotalIncome(
   }
 }
 
-export async function calculateTotalExpenses(
-  userId,
-  categoryName = null,
-  month = null,
-  startDate = null,
-  endDate = null
-) {
+export async function calculateTotalExpenses(userId, categoryName = null, month = null, startDate = null, endDate = null) {
   try {
+    const pipeline = [];
     const matchQuery = {
       userId: userId,
       type: "expense",
       status: { $in: ["completed", "pending"] },
     };
 
-    if (categoryName) {
-      const category = await Category.findOne({
-        userId: userId,
-        name: { $regex: new RegExp(`^${categoryName.trim()}$`, "i") },
-      });
-      if (!category) return 0;
-      matchQuery.categoryId = category._id.toString();
-    }
-
-    if (month) {
-    } else if (startDate && endDate) {
+    if (startDate && endDate) {
       matchQuery.date = { $gte: startDate, $lte: endDate };
     }
-
-    const pipeline = [{ $match: matchQuery }];
+    pipeline.push({ $match: matchQuery });
 
     if (month) {
-      pipeline.push({
-        $match: {
-          $expr: {
-            $eq: [
-              {
-                $dateToString: {
-                  format: "%Y-%m",
-                  date: "$date",
-                  timezone: TIMEZONE,
-                },
-              },
-              month,
-            ],
-          },
-        },
-      });
+      pipeline.push({ $match: { $expr: { $eq: [ { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } }, month ] } } });
     }
 
     pipeline.push({ $group: { _id: null, total: { $sum: "$amount" } } });
@@ -265,14 +195,7 @@ export async function getCategoryReport(userId, days) {
   ]);
 }
 
-export async function getExpenseDetails(
-  userId,
-  month,
-  monthName,
-  categoryName,
-  startDate = null,
-  endDate = null
-) {
+export async function getExpenseDetails(userId, month, monthName, categoryName, startDate = null, endDate = null, periodName = null) {
   try {
     const matchQuery = {
       userId: userId,
@@ -280,7 +203,9 @@ export async function getExpenseDetails(
       status: { $in: ["completed", "pending"] },
     };
 
-    if (month) {
+    if (startDate && endDate) {
+      matchQuery.date = { $gte: startDate, $lte: endDate };
+    } else if (month) {
       const year = parseInt(month.split("-")[0]);
       const monthNumber = parseInt(month.split("-")[1]);
       const startDate = new Date(Date.UTC(year, monthNumber - 1, 1));
@@ -363,16 +288,11 @@ export async function getExpenseDetails(
     }
 
     let header;
-    const periodName = monthName
-      ? `no mês de ${monthName}`
-      : startDate && endDate
-      ? `no período selecionado`
-      : "";
-
+    const periodNameToUse = periodName || `no mês de ${monthName}`;
     if (categoryName) {
-      header = `🧾 Detalhes dos gastos em _*${categoryName}*_ ${periodName}:`;
+      header = `🧾 Detalhes dos gastos em _*${categoryName}*_ ${periodNameToUse}:`;
     } else {
-      header = `🧾 Detalhes de todos os gastos ${periodName}:`;
+      header = `🧾 Detalhes de todos os gastos ${periodNameToUse}:`;
     }
 
     const linesToChunk = [header, ...bodyLines];
@@ -399,7 +319,7 @@ export async function getIncomeDetails(
   monthName,
   categoryName,
   startDate = null,
-  endDate = null
+  endDate = null, periodName = null
 ) {
   try {
     let matchStage = {
@@ -422,7 +342,7 @@ export async function getIncomeDetails(
         ],
       };
     } else if (startDate && endDate) {
-      matchQuery.date = { $gte: startDate, $lte: endDate };
+      matchStage.date = { $gte: startDate, $lte: endDate };
     }
 
     const pipeline = [
@@ -491,11 +411,7 @@ export async function getIncomeDetails(
     }
 
     let header;
-    const periodName = monthName
-      ? `no mês de ${monthName}`
-      : startDate && endDate
-      ? `no período selecionado`
-      : "";
+    const periodNameToUse = periodName || (monthName ? `no mês de ${monthName}` : '');
 
     if (categoryName) {
       header = `🧾 Detalhes das receitas em _*${categoryName}*_ ${periodName}:`;

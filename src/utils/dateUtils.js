@@ -24,89 +24,45 @@ export function formatInBrazilWithTime(date) {
 
 export function getDateRangeFromPeriod(period) {
   const nowInBrazil = toZonedTime(new Date(), TIMEZONE);
+  
   nowInBrazil.setHours(0, 0, 0, 0);
 
   let startDate = new Date(nowInBrazil);
   let endDate = new Date(nowInBrazil);
-
   let periodName = "";
 
   switch (period) {
-    case "today":
+    case 'today':
       periodName = "Hoje";
       endDate.setHours(23, 59, 59, 999);
       break;
-    case "yesterday":
+    case 'yesterday':
       periodName = "Ontem";
       startDate.setDate(startDate.getDate() - 1);
       endDate.setDate(endDate.getDate() - 1);
       endDate.setHours(23, 59, 59, 999);
       break;
-    case "this_week":
-      const currentDay = nowInBrazil.getDay();
+    case 'this_week':
+      const currentDay = nowInBrazil.getDay(); // 0=Domingo
       startDate.setDate(startDate.getDate() - currentDay);
       endDate = new Date(startDate);
       endDate.setDate(endDate.getDate() + 6);
       endDate.setHours(23, 59, 59, 999);
-
-      const startFormatted = `${startDate
-        .getDate()
-        .toString()
-        .padStart(2, "0")}/${(startDate.getMonth() + 1)
-        .toString()
-        .padStart(2, "0")}`;
-      const endFormatted = `${endDate.getDate().toString().padStart(2, "0")}/${(
-        endDate.getMonth() + 1
-      )
-        .toString()
-        .padStart(2, "0")}`;
-
-      periodName = `nesta Semana (de ${startFormatted} a ${endFormatted})`;
-
+      
+      const startFmt = formatInBrazil(startDate, 'dd/MM');
+      const endFmt = formatInBrazil(endDate, 'dd/MM');
+      periodName = `nesta Semana (de ${startFmt} a ${endFmt})`;
       break;
-    case "last_week":
+    case 'last_week':
       const pastDay = nowInBrazil.getDay();
-      startDate.setDate(startDate.getDate() - pastDay - 7);
+      startDate.setDate(startDate.getDate() - pastDay - 7); 
       endDate = new Date(startDate);
       endDate.setDate(endDate.getDate() + 6);
       endDate.setHours(23, 59, 59, 999);
 
-      const lastStartFormatted = `${startDate
-        .getDate()
-        .toString()
-        .padStart(2, "0")}/${(startDate.getMonth() + 1)
-        .toString()
-        .padStart(2, "0")}`;
-      const lastEndFormatted = `${endDate
-        .getDate()
-        .toString()
-        .padStart(2, "0")}/${(endDate.getMonth() + 1)
-        .toString()
-        .padStart(2, "0")}`;
-
-      periodName = `na Semana Passada (de ${lastStartFormatted} a ${lastEndFormatted})`;
-
-      break;
-    case "two_weeks_ago":
-      const dayOfWeek = nowInBrazil.getDay();
-      startDate.setDate(startDate.getDate() - dayOfWeek - 14);
-      endDate = new Date(startDate);
-      endDate.setDate(endDate.getDate() + 6);
-      endDate.setHours(23, 59, 59, 999);
-
-      const twoWeeksStart = `${startDate
-        .getDate()
-        .toString()
-        .padStart(2, "0")}/${(startDate.getMonth() + 1)
-        .toString()
-        .padStart(2, "0")}`;
-      const twoWeeksEnd = `${endDate.getDate().toString().padStart(2, "0")}/${(
-        endDate.getMonth() + 1
-      )
-        .toString()
-        .padStart(2, "0")}`;
-
-      periodName = `na Semana Retrasada (de ${twoWeeksStart} a ${twoWeeksEnd})`;
+      const lastStartFmt = formatInBrazil(startDate, 'dd/MM');
+      const lastEndFmt = formatInBrazil(endDate, 'dd/MM');
+      periodName = `na Semana Passada (de ${lastStartFmt} a ${lastEndFmt})`;
       break;
   }
   return { startDate, endDate, periodName };
