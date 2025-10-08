@@ -1,7 +1,12 @@
 import Transaction from "../models/Transaction.js";
 import Category from "../models/Category.js";
 import Reminder from "../models/Reminder.js";
-import { TIMEZONE, formatInBrazilWithTime } from "../utils/dateUtils.js";
+import {
+  TIMEZONE,
+  formatInBrazilWithTime,
+  formatInBrazil,
+} from "../utils/dateUtils.js";
+import { toZonedTime } from "date-fns-tz";
 import InventoryTemplate from "../models/InventoryTemplate.js";
 import Product from "../models/Product.js";
 
@@ -41,10 +46,38 @@ function chunkLinesIntoMessages(lines) {
   return finalMessages;
 }
 
-export async function getMonthlySummary(userId, month, startDate = null, endDate = null) {
+export async function getMonthlySummary(
+  userId,
+  month = null,
+  startDate = null,
+  endDate = null
+) {
   try {
-    const totalIncome = await calculateTotalIncome(userId, month, null, startDate, endDate);
-    const totalExpenses = await calculateTotalExpenses(userId, null, month, startDate, endDate);
+    let effectiveStartDate = startDate;
+    let effectiveEndDate = endDate;
+    let effectiveMonth = month;
+
+    if (!effectiveStartDate && !effectiveEndDate && !effectiveMonth) {
+      const now = toZonedTime(new Date(), TIMEZONE);
+      effectiveMonth = `${now.getFullYear()}-${String(
+        now.getMonth() + 1
+      ).padStart(2, "0")}`;
+    }
+
+    const totalIncome = await calculateTotalIncome(
+      userId,
+      effectiveMonth,
+      null,
+      effectiveStartDate,
+      effectiveEndDate
+    );
+    const totalExpenses = await calculateTotalExpenses(
+      userId,
+      null,
+      effectiveMonth,
+      effectiveStartDate,
+      effectiveEndDate
+    );
     const balance = totalIncome - totalExpenses;
     return { income: totalIncome, expenses: totalExpenses, balance: balance };
   } catch (err) {
@@ -53,7 +86,13 @@ export async function getMonthlySummary(userId, month, startDate = null, endDate
   }
 }
 
-export async function calculateTotalIncome(userId, month = null, categoryName = null, startDate = null, endDate = null) {
+export async function calculateTotalIncome(
+  userId,
+  month = null,
+  categoryName = null,
+  startDate = null,
+  endDate = null
+) {
   try {
     const pipeline = [];
     const matchQuery = {
@@ -63,12 +102,13 @@ export async function calculateTotalIncome(userId, month = null, categoryName = 
     };
 
     if (startDate && endDate) {
-      matchQuery.date = { $gte: startDate, $lte: endDate };
-    }
-    pipeline.push({ $match: matchQuery });
-
-    if (month) {
-      pipeline.push({ $match: { $expr: { $eq: [ { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } }, month ] } } });
+        matchQuery.date = { $gte: new Date(startDate), $lte: new Date(endDate) };
+        pipeline.push({ $match: matchQuery });
+    } else if (month) {
+        pipeline.push({ $match: matchQuery });
+        pipeline.push({ $match: { $expr: { $eq: [ { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } }, month ] } } });
+    } else {
+        pipeline.push({ $match: matchQuery });
     }
 
     if (categoryName) {
@@ -99,7 +139,13 @@ export async function calculateTotalIncome(userId, month = null, categoryName = 
   }
 }
 
-export async function calculateTotalExpenses(userId, categoryName = null, month = null, startDate = null, endDate = null) {
+export async function calculateTotalExpenses(
+  userId,
+  categoryName = null,
+  month = null,
+  startDate = null,
+  endDate = null
+) {
   try {
     const pipeline = [];
     const matchQuery = {
@@ -109,12 +155,44 @@ export async function calculateTotalExpenses(userId, categoryName = null, month 
     };
 
     if (startDate && endDate) {
-      matchQuery.date = { $gte: startDate, $lte: endDate };
+      matchQuery.date = { $gte: new Date(startDate), $lte: new Date(endDate) };
+      pipeline.push({ $match: matchQuery });
+    } else if (month) {
+      pipeline.push({ $match: matchQuery });
+      pipeline.push({ $match: { $expr: { $eq: [ { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } }, month ] } } });
+    } else {
+       pipeline.push({ $match: matchQuery });
     }
-    pipeline.push({ $match: matchQuery });
+
+    if (categoryName) {
+      const category = await Category.findOne({
+        userId,
+        name: { $regex: new RegExp(`^${categoryName.trim()}$`, "i") },
+      });
+      if (category) {
+        pipeline.push({ $match: { categoryId: category._id.toString() } });
+      } else {
+        return 0;
+      }
+    }
 
     if (month) {
-      pipeline.push({ $match: { $expr: { $eq: [ { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } }, month ] } } });
+      pipeline.push({
+        $match: {
+          $expr: {
+            $eq: [
+              {
+                $dateToString: {
+                  format: "%Y-%m",
+                  date: "$date",
+                  timezone: TIMEZONE,
+                },
+              },
+              month,
+            ],
+          },
+        },
+      });
     }
 
     pipeline.push({ $group: { _id: null, total: { $sum: "$amount" } } });
@@ -195,7 +273,15 @@ export async function getCategoryReport(userId, days) {
   ]);
 }
 
-export async function getExpenseDetails(userId, month, monthName, categoryName, startDate = null, endDate = null, periodName = null) {
+export async function getExpenseDetails(
+  userId,
+  month,
+  monthName,
+  categoryName,
+  startDate = null,
+  endDate = null,
+  periodName = null
+) {
   try {
     const matchQuery = {
       userId: userId,
@@ -204,16 +290,15 @@ export async function getExpenseDetails(userId, month, monthName, categoryName, 
     };
 
     if (startDate && endDate) {
-      matchQuery.date = { $gte: startDate, $lte: endDate };
+      matchQuery.date = { $gte: new Date(startDate), $lte: new Date(endDate) };
     } else if (month) {
       const year = parseInt(month.split("-")[0]);
       const monthNumber = parseInt(month.split("-")[1]);
-      const startDate = new Date(Date.UTC(year, monthNumber - 1, 1));
-      const endDate = new Date(Date.UTC(year, monthNumber, 1));
-      endDate.setMilliseconds(endDate.getMilliseconds() - 1);
-      matchQuery.date = { $gte: startDate, $lte: endDate };
-    } else if (startDate && endDate) {
-      matchQuery.date = { $gte: startDate, $lte: endDate };
+      const startOfMonth = new Date(Date.UTC(year, monthNumber - 1, 1));
+      const endOfMonth = new Date(
+        Date.UTC(year, monthNumber, 0, 23, 59, 59, 999)
+      );
+      matchQuery.date = { $gte: startOfMonth, $lte: endOfMonth };
     }
 
     if (categoryName) {
@@ -288,7 +373,8 @@ export async function getExpenseDetails(userId, month, monthName, categoryName, 
     }
 
     let header;
-    const periodNameToUse = periodName || `no mês de ${monthName}`;
+    const periodNameToUse =
+      periodName || (monthName ? `no mês de ${monthName}` : "");
     if (categoryName) {
       header = `🧾 Detalhes dos gastos em _*${categoryName}*_ ${periodNameToUse}:`;
     } else {
@@ -319,7 +405,8 @@ export async function getIncomeDetails(
   monthName,
   categoryName,
   startDate = null,
-  endDate = null, periodName = null
+  endDate = null,
+  periodName = null
 ) {
   try {
     let matchStage = {
@@ -328,7 +415,9 @@ export async function getIncomeDetails(
       status: { $in: ["completed", "pending"] },
     };
 
-    if (month) {
+    if (startDate && endDate) {
+      matchStage.date = { $gte: new Date(startDate), $lte: new Date(endDate) };
+    } else if (month) {
       matchStage.$expr = {
         $eq: [
           {
@@ -341,8 +430,6 @@ export async function getIncomeDetails(
           month,
         ],
       };
-    } else if (startDate && endDate) {
-      matchStage.date = { $gte: startDate, $lte: endDate };
     }
 
     const pipeline = [
@@ -411,12 +498,12 @@ export async function getIncomeDetails(
     }
 
     let header;
-    const periodNameToUse = periodName || (monthName ? `no mês de ${monthName}` : '');
-
+    const periodNameToUse =
+      periodName || (monthName ? `no mês de ${monthName}` : "");
     if (categoryName) {
-      header = `🧾 Detalhes das receitas em _*${categoryName}*_ ${periodName}:`;
+      header = `🧾 Detalhes das receitas em _*${categoryName}*_ ${periodNameToUse}:`;
     } else {
-      header = `🧾 Detalhes de todas as receitas ${periodName}:`;
+      header = `🧾 Detalhes de todas as receitas ${periodNameToUse}:`;
     }
 
     const linesToChunk = [header, ...bodyLines];
