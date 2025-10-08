@@ -6,9 +6,7 @@ const openai = new OpenAI({
 });
 
 export function sendGreetingMessage(twiml) {
-  twiml.message(`👋 Olá! Sou a ADAP, sua Assistente Financeira Pessoal. Organize suas finanças de forma simples e direta, aqui mesmo no WhatsApp.
-
-Confira nossa lista de comandos:
+  twiml.message(`👋 Olá! Sou a ADAP, sua Assistente Financeira Pessoal. Confira nossa lista de comandos:
 
 *1. LANÇAMENTOS MANUAIS* 📝
  • "25 mercado"
@@ -16,20 +14,20 @@ Confira nossa lista de comandos:
  • "3500 celular em 10x"
 
 *2. REGISTRO POR FOTO* 📸
- • *Nota Fiscal de Loja*
- • *Conta de Consumo (água, luz, etc.)*
- • *Comprovante de PIX*
+ • _Nota Fiscal de Loja_
+ • _Conta de Consumo (água, luz, etc.)_
+ • _Comprovante de PIX_
 
 *3. RELATÓRIOS E CONSULTAS* 📊
- • *"saldo"*: Mostra o resumo do mês atual (receitas, despesas e balanço).
- • *"gasto total"* ou *"receita total"*: Use para ver os totais de um período.
-   - Para o mês atual: *"gasto total"*
-   - Para um intervalo: *"receita de 01/10 a 15/10"*
-   - Para um único dia: *"gastos do dia 20/09"*, *"gastos de ontem"*
-   - Depois, envie *"detalhes"* para ver a lista de itens.
- • *Gráfico de Barras:* "quais meus gastos nos últimos 7 dias"
- • *Gráfico de Pizza (Gastos):* "onde gastei nos últimos 15 dias"
- • *Gráfico de Pizza (Receitas):* "gráfico dos meus ganhos"
+ • "saldo": Mostra o saldo do mês atual
+ • "gasto total" ou "receita total":
+  - Para o mês atual: "gasto total"
+  - Para um intervalo: "receita de 01/10 a 15/10"*
+  - Para um único dia: "gastos do dia 20/09", "gastos de ontem"
+  - Depois, envie "detalhes" para ver a lista de itens.
+ • _Gráfico de Barras:_ "quais meus gastos nos últimos 7 dias"
+ • _Gráfico de Pizza (Gastos):_ "onde gastei nos últimos 15 dias"
+ • _Gráfico de Pizza (Receitas):_ "gráfico dos meus ganhos"
 
  *4. ORGANIZAÇÃO* ⏰
  • "me lembre de pagar o aluguel dia 5"
@@ -37,11 +35,11 @@ Confira nossa lista de comandos:
  • "parcelamentos ativos"
 
 *5. CONTROLE DE ESTOQUE (💎 PLANO DIAMANTE)* 📦
- • *Criar um Estoque:* "criar estoque de camisetas"
- • *Adicionar Produto:* "adicionar camiseta"
- • *Ver Produtos:* "ver estoque de camisetas"
- • *Movimentar Estoque:* "vendi 2 #P0001" ou "entrada 10 #P0002"
- • *Definir Alerta:* "alerta #P0001 para 5 unidades"
+ • _Criar um Estoque:_ "criar estoque de camisetas"
+ • _Adicionar Produto:_ "adicionar camiseta"
+ • _Ver Produtos:_ "ver estoque de camisetas"
+ • _Movimentar Estoque:_ "vendi 2 #P0001" ou "entrada 10 #P0002"
+ • _Definir Alerta:_ "alerta #P0001 para 5 unidades"
 
 *6. EXCLUIR REGISTROS* 🗑️
 Use sempre o ID (#...) fornecido na mensagem de confirmação.
