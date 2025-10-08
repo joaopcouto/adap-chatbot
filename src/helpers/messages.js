@@ -21,11 +21,15 @@ Confira nossa lista de comandos:
  • *Comprovante de PIX*
 
 *3. RELATÓRIOS E CONSULTAS* 📊
- • "receita total" (mostra receitas, despesas e saldo)
- • "gasto total em agosto"
- • *Gráfico de Gastos (Barras):* "quais meus gastos nos últimos 7 dias"
- • *Gráfico de Gastos (Pizza):* "onde gastei nos últimos 15 dias"
- • *Gráfico de Receitas (Pizza):* "gráfico dos meus ganhos"
+ • *"saldo"*: Mostra o resumo do mês atual (receitas, despesas e balanço).
+ • *"gasto total"* ou *"receita total"*: Use para ver os totais de um período.
+   - Para o mês atual: *"gasto total"*
+   - Para um intervalo: *"receita de 01/10 a 15/10"*
+   - Para um único dia: *"gastos do dia 20/09"*, *"gastos de ontem"*
+   ↳ Depois, envie *"detalhes"* para ver a lista de itens.
+ • *Gráfico de Barras:* "quais meus gastos nos últimos 7 dias"
+ • *Gráfico de Pizza (Gastos):* "onde gastei nos últimos 15 dias"
+ • *Gráfico de Pizza (Receitas):* "gráfico dos meus ganhos"
 
  *4. ORGANIZAÇÃO* ⏰
  • "me lembre de pagar o aluguel dia 5"

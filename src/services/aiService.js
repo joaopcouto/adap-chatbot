@@ -78,10 +78,9 @@ export async function interpretMessageWithAI(message, currentDate) {
       "generate_daily_chart" → O usuário quer gerar um gráfico de despesas diárias. Extraia a quantidade de dias.  
       "generate_category_chart" → O usuário quer gerar um gráfico de despesas por categoria. Extraia os dias.
       "generate_income_category_chart" → O usuário quer gerar um gráfico de receitas por categoria. Extraia os dias.
-      "get_total_income" → O usuário quer recuperar o valor total de receitas.
-      "get_total" → O usuário quer recuperar o valor total gasto ou recebido para um mês específico, ou o mês atual, opcionalmente filtrado por uma categoria específica.
-      "get_balance" → O usuário quer ver o saldo do mês atual.
-      "get_active_installments" → O usuário quer uma lista de todos os seus planos de parcelamento ativos.
+      "get_total_income" → O usuário quer recuperar o valor total de receitas para um período específico (dia, intervalo de datas) ou para o mês atual, opcionalmente filtrado por uma categoria específica.
+      "get_total" → O usuário quer recuperar o valor total gasto para um período específico (dia, intervalo de datas) ou para o mês atual, opcionalmente filtrado por uma categoria específica.
+      "get_balance" → O usuário quer ver o saldo do mês atual."get_active_installments" → O usuário quer uma lista de todos os seus planos de parcelamento ativos.
       "detalhes" → O usuário quer mostrar uma lista de todos os itens em uma determinada data"
       "greeting" → O usuário envia uma saudação (ex: "Oi", "Olá").
       "instructions" → O usuário pergunta como usar o assistente ou o que ele pode fazer.
@@ -109,18 +108,13 @@ export async function interpretMessageWithAI(message, currentDate) {
     - Para "add_installment_expense": Extraia 'totalAmount', 'description' e 'installments'. A estrutura é tipicamente "(valor total) (descrição) em (parcelas)x" ou "parcelar (descrição) de (valor total) em (parcelas) vezes".
     - Para "delete_transaction": Extraia 'messageId'.
     - Para "reminder": Extraia 'description' e 'date' no formato ISO 8601.
-    - Para "get_total" ou "get_total_income", se o usuário mencionar um mês (ex: "em Janeiro"), use o **Ano Atual** do contexto para formar o campo "month" (ex: "${currentYear}-01").
     - Para "reminder", resolva datas relativas como "amanhã", "dia 15", "próxima segunda" usando o **Contexto de Data Atual**. O formato da data deve ser ISO 8601 (YYYY-MM-DDTHH:mm:ss.sssZ).
+    - Para as intenções "get_total" ou "get_total_income":
+      - Se o usuário disser "receita total" ou "gasto total" sem especificar datas, use o mês atual. O campo 'month' deverá ser o mês e ano atual no formato "YYYY-MM" e 'monthName' o nome do mês atual.
+      - Se o usuário especificar um período como "receita de DD/MM até DD/MM" ou "gastos do dia DD/MM", extraia 'startDate' e 'endDate' no formato ISO 8601 (YYYY-MM-DDTHH:mm:ss.sssZ). Para um único dia, 'startDate' e 'endDate' serão o mesmo dia, com 'startDate' no início do dia e 'endDate' no final do dia.
     - Regra de Categoria: Se a categoria fornecida NÃO estiver na lista de categorias válidas, a intenção DEVE ser "add_transaction_new_category".
       - Categorias válidas (despesa): "gastos fixos", "lazer", "investimento", "conhecimento", "doação"
       - Categorias válidas (receita): "Salário", "Renda Extra"
-    - Regra de Período: Para as intenções "get_total" e "get_total_income", o usuário pode especificar um 'period' ou um 'month'.
-      - O campo 'period' SÓ PODE ter um dos seguintes valores: "today", "yesterday", "this_week", "last_week", "two_weeks_ago".
-      - O campo 'month' é usado se o usuário mencionar um nome de mês (ex: "janeiro", "agosto").
-      - Se o usuário pedir um período inválido (ex: "semana antepassada", "dia 15"), os campos 'period' e 'month' DEVEM ser nulos. Não tente corrigir ou adivinhar.
-
-
-  3. Regras de Validação e Categorização:
     - Se a categoria não for especificada, determine-a com base na descrição usando as categorias válidas.
     - Se a categorização não estiver clara ou o usuário tiver acesso a "add_transaction_new_category" (categorias definidas pelo usuário), e houver uma despesa/receita passada com a mesma descrição, reutilize a última categoria conhecida usada para essa descrição.
     - Para a intenção "get_total", a categoria deve ser especificada, e pode ser qualquer categoria, incluindo as definidas pelo usuário.
@@ -134,11 +128,11 @@ export async function interpretMessageWithAI(message, currentDate) {
       - Se a pergunta envolver **"receitas"**, **"ganhos"** ou **"de onde veio"** e pedir um gráfico → use "generate_income_category_chart".
         Ex: "gráfico dos meus ganhos", "de onde vieram minhas receitas nos últimos 10 dias".
   
-  4. Formato de Resposta:
+  3. Formato de Resposta:
        Responda apenas com um objeto JSON válido sem qualquer formatação ou explicação adicional
      - Retorne um objeto JSON com a intenção e dados extraídos. Use este formato:
        {
-         "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "delete_list_item" | "generate_daily_chart" | "generate_category_chart" | "generate_income_category_chart" | "get_total_income" |"get_total" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "google_connect" | "google_disconnect" | "google_status" | "google_enable_sync" | "google_disable_sync" | "google_debug" | "financial_help" | "create_inventory_template" | "add_product_to_inventory" | "list_inventory_templates" | "update_inventory_quantity" | "view_inventory" | "set_inventory_alert" ,
+         "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "delete_list_item" | "generate_daily_chart" | "generate_category_chart" | "generate_income_category_chart" | "get_total_income" |"get_total" | "get_balance" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "google_connect" | "google_disconnect" | "google_status" | "google_enable_sync" | "google_disable_sync" | "google_debug" | "financial_help" | "create_inventory_template" | "add_product_to_inventory" | "list_inventory_templates" | "update_inventory_quantity" | "view_inventory" | "set_inventory_alert" ,
          "data": {
            "amount": number,
            "description": string,
@@ -150,14 +144,15 @@ export async function interpretMessageWithAI(message, currentDate) {
            "itemNumber": number,
            "messageId": string,
            "days": number,
-           "month": string,
+           "month": string, // YYYY-MM
            "monthName": string,
-           "period": string, // "today", "yesterday", "this_week", "last_week", "two_weeks_ago"
+           "startDate": string, // ISO 8601 (YYYY-MM-DDTHH:mm:ss.sssZ) - Início do período (00:00:00.000)
+           "endDate": string,   // ISO 8601 (YYYY-MM-DDTHH:mm:ss.sssZ) - Fim do período (23:59:59.999)
            "date": string,
          }
        }
   
-  5. Exemplos de Entradas do Usuário e Saídas Corretas: 
+  4. Exemplos de Entradas do Usuário e Saídas Corretas: 
     - Usuário: "Recebi 1000 reais de salário"
       Resposta: { "intent": "add_income", "data": { "amount": 1000, "description": "salário", "category": null } }
 
@@ -210,25 +205,19 @@ export async function interpretMessageWithAI(message, currentDate) {
 
     - Usuário: "Qual é o meu gasto total?"
       Resposta: { "intent": "get_total", "data": { "month": "${currentYear}-${currentMonth}", "monthName": "${monthName}" } }
-    - Usuário: "Qual meu gasto total com transporte em Janeiro?"
-      Resposta: { "intent": "get_total", "data": { "category": "transporte", "month": "${currentYear}-01", "monthName": "Janeiro" } }
-    - Usuário: "gasto total outubro"
-      Resposta: { "intent": "get_total", "data": { "month": "${currentYear}-10", "monthName": "outubro" } }
-    - Usuário: "gasto total de hoje"
-      Resposta: { "intent": "get_total", "data": { "period": "today" } }
-    - Usuário: "gasto total da semana passada"
-      Resposta: { "intent": "get_total", "data": { "period": "last_week" } }
-    - Usuário: "gasto total da semana retrasada"
-      Resposta: { "intent": "get_total", "data": { "period": "two_weeks_ago" } }
+    - Usuário: "Gasto total de 25/09 até 07/10"
+      Resposta: { "intent": "get_total", "data": { "startDate": "${currentYear}-09-25T03:00:00.000Z", "endDate": "${currentYear}-10-07T23:59:59.999Z" } }
+    - Usuário: "gasto total do dia 20/08"
+      Resposta: { "intent": "get_total", "data": { "startDate": "${currentYear}-08-20T03:00:00.000Z", "endDate": "${currentYear}-08-20T23:59:59.999Z" } }
+    - Usuário: "Gasto total em transporte de 25/09 até 07/10"
+      Resposta: { "intent": "get_total", "data": { "category": "transporte", "startDate": "${currentYear}-09-25T03:00:00.000Z", "endDate": "${currentYear}-10-07T23:59:59.999Z" } }
 
     - Usuário: "Qual é a minha receita total?"
       Resposta: { "intent": "get_total_income", "data": { "month": "${currentYear}-${currentMonth}", "monthName": "${monthName}" } }
-    - Usuário: "Me mostre a receita de Renda Extra do mês de maio"  
-      Resposta: { "intent": "get_total_income", "data": { "category": "Renda Extra", "month": "${currentYear}-05", "monthName": "Maio" } }
-    - Usuário: "receita total de ontem"
-      Resposta: { "intent": "get_total_income", "data": { "period": "yesterday" } }
-    - Usuário: "receita da semana"
-      Resposta: { "intent": "get_total_income", "data": { "period": "this_week" } }
+    - Usuário: "Receita de 10/01 até 15/01"  
+      Resposta: { "intent": "get_total_income", "data": { "startDate": "${currentYear}-01-10T03:00:00.000Z", "endDate": "${currentYear}-01-15T23:59:59.999Z" } }
+    - Usuário: "Receita de Renda Extra do dia 05/02"  
+      Resposta: { "intent": "get_total_income", "data": { "category": "Renda Extra", "startDate": "${currentYear}-02-05T03:00:00.000Z", "endDate": "${currentYear}-02-05T23:59:59.999Z" } }
   
     - Usuário: "ver saldo"
       Resposta: { "intent": "get_balance", "data": {} }
@@ -335,7 +324,7 @@ export async function interpretMessageWithAI(message, currentDate) {
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [{ role: "user", content: prompt }],
-    max_tokens: 150,
+    max_tokens: 400,
   });
 
   try {

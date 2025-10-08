@@ -4,7 +4,7 @@ import { sendTextMessage } from "../services/twilioService.js";
 import { devLog } from "../helpers/logger.js";
 import { generateCorrelationId } from "../helpers/logger.js";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
-import { TIMEZONE, getDateRangeFromPeriod } from "../utils/dateUtils.js";
+import { TIMEZONE, getDateRangeFromPeriod, formatInBrazil } from "../utils/dateUtils.js";
 
 import {
   interpretMessageWithAI,
@@ -1030,119 +1030,76 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                 }
                 break;
               }
-
               case "get_total":
               case "get_total_income": {
-                let { category, month, monthName, period } =
-                  interpretation.data;
-                let startDate, endDate, periodName;
+                let { category, month, monthName, startDate, endDate } = interpretation.data;
+                let periodName;
 
-                const validPeriods = [
-                  "today",
-                  "yesterday",
-                  "this_week",
-                  "last_week",
-                  "two_weeks_ago",
-                ];
-
-                if (period && !validPeriods.includes(period)) {
-                  period = null; 
-                }
-
-                if (!period && !month) {
-                  twiml.message(
-                    "🤔 Não entendi o período. Você pode pedir o total para:\n- Hoje\n- Ontem\n- Esta semana\n- Semana passada\n- Semana retrasada\n- Um mês específico (ex: 'gasto total em agosto')"
-                  );
+                if (!startDate && !month) {
+                  twiml.message("🤔 Não entendi o período. Você pode pedir o total para o mês atual (ex: 'gasto total') ou para um período específico (ex: 'gastos de 25/09 a 07/10').");
                   break;
                 }
+                
+                if (startDate && endDate) {
+                  const start = new Date(startDate);
+                  const end = new Date(endDate);
 
-                if (period) {
-                  const range = getDateRangeFromPeriod(period);
-                  startDate = range.startDate;
-                  endDate = range.endDate;
-                  periodName = range.periodName;
+                  if (start.toDateString() === end.toDateString()) {
+                    periodName = `no dia ${formatInBrazil(start)}`;
+                  } else {
+                    periodName = `de ${formatInBrazil(start)} a ${formatInBrazil(end)}`;
+                  }
                 } else {
                   periodName = `no mês de ${monthName}`;
                 }
 
-                const isIncome = interpretation.intent === "get_total_income";
+                const isIncome = interpretation.intent === 'get_total_income';
 
                 const total = isIncome
-                  ? await calculateTotalIncome(
-                      userIdString,
-                      month,
-                      category,
-                      startDate,
-                      endDate
-                    )
-                  : await calculateTotalExpenses(
-                      userIdString,
-                      category,
-                      month,
-                      startDate,
-                      endDate
-                    );
-
+                  ? await calculateTotalIncome(userIdString, month, category, startDate, endDate)
+                  : await calculateTotalExpenses(userIdString, category, month, startDate, endDate); 
+                  
                 if (total === 0) {
-                  let zeroMessage = `🤷‍♀️ Nenhuma movimentação registrada ${periodName}.`;
-                  if (category) {
-                    const catFormatted =
-                      category.charAt(0).toUpperCase() + category.slice(1);
-                    zeroMessage = `🤷‍♀️ Nenhum(a) ${
-                      isIncome ? "receita" : "gasto"
-                    } na categoria _*${catFormatted}*_ ${periodName}.`;
-                  }
-                  twiml.message(zeroMessage);
+                    let zeroMessage = `🤷‍♀️ Nenhuma movimentação registrada ${periodName}.`;
+                    if (category) {
+                      const catFormatted = category.charAt(0).toUpperCase() + category.slice(1);
+                      zeroMessage = `🤷‍♀️ Nenhum(a) ${isIncome ? "receita" : "gasto"} na categoria _*${catFormatted}*_ ${periodName}.`;
+                    }
+                    twiml.message(zeroMessage);
                 } else {
-                  const typeText = isIncome ? "Receita total" : "Gasto total";
-                  const icon = isIncome ? "📈" : "📉";
+                    const typeText = isIncome ? "Receita total" : "Gasto total";
+                    const icon = isIncome ? "📈" : "📉";
 
-                  let responseMessage = `${icon} *${typeText}* ${periodName}: \nR$ ${total.toFixed(
-                    2
-                  )}`;
-                  if (category) {
-                    const catFormatted =
-                      category.charAt(0).toUpperCase() + category.slice(1);
-                    responseMessage = `${icon} *${typeText}* em _*${catFormatted}*_ ${periodName}: \nR$ ${total.toFixed(
-                      2
-                    )}`;
-                  }
+                    let responseMessage = `${icon} *${typeText}* ${periodName}: \nR$ ${total.toFixed(2)}`;
+                    if (category) {
+                      const catFormatted = category.charAt(0).toUpperCase() + category.slice(1);
+                      responseMessage = `${icon} *${typeText}* em _*${catFormatted}*_ ${periodName}: \nR$ ${total.toFixed(2)}`;
+                    }
 
-                  responseMessage += `\n\nDigite "detalhes" para ver a lista de itens.`;
-                  conversationState[userIdString] = {
-                    type: isIncome ? "income" : "expense",
-                    category,
-                    month,
-                    monthName,
-                    startDate,
-                    endDate,
-                    periodName,
-                  };
-                  twiml.message(responseMessage);
+                    responseMessage += `\n\nDigite "detalhes" para ver a lista de itens.`;
+                    
+                    conversationState[userIdString] = {
+                      type: isIncome ? "income" : "expense",
+                      category,
+                      month,       
+                      monthName,   
+                      startDate,   
+                      endDate,
+                      periodName, 
+                    };
+                    twiml.message(responseMessage);
                 }
                 break;
               }
               case "get_balance": {
                 const now = new Date();
-                const currentMonthCode = `${now.getFullYear()}-${String(
-                  now.getMonth() + 1
-                ).padStart(2, "0")}`;
-                const currentMonthName =
-                  now
-                    .toLocaleString("pt-BR", { month: "long" })
-                    .charAt(0)
-                    .toUpperCase() +
-                  now.toLocaleString("pt-BR", { month: "long" }).slice(1);
+                const currentMonthCode = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+                const currentMonthName = now.toLocaleString("pt-BR", { month: "long" }).charAt(0).toUpperCase() + now.toLocaleString("pt-BR", { month: "long" }).slice(1);
 
-                const summary = await getMonthlySummary(
-                  userIdString,
-                  currentMonthCode
-                );
+                const summary = await getMonthlySummary(userIdString, currentMonthCode);
 
                 const balancePrefix = summary.balance >= 0 ? "💰" : "⚠️";
-                const balanceMessage = `${balancePrefix} *Saldo de ${currentMonthName}:* *R$ ${summary.balance.toFixed(
-                  2
-                )}*`;
+                const balanceMessage = `${balancePrefix} *Saldo de ${currentMonthName}:* *R$ ${summary.balance.toFixed(2)}*`;
 
                 twiml.message(balanceMessage);
                 break;
