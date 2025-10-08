@@ -26,7 +26,7 @@ Confira nossa lista de comandos:
    - Para o mês atual: *"gasto total"*
    - Para um intervalo: *"receita de 01/10 a 15/10"*
    - Para um único dia: *"gastos do dia 20/09"*, *"gastos de ontem"*
-   ↳ Depois, envie *"detalhes"* para ver a lista de itens.
+   - Depois, envie *"detalhes"* para ver a lista de itens.
  • *Gráfico de Barras:* "quais meus gastos nos últimos 7 dias"
  • *Gráfico de Pizza (Gastos):* "onde gastei nos últimos 15 dias"
  • *Gráfico de Pizza (Receitas):* "gráfico dos meus ganhos"
