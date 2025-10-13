@@ -101,6 +101,7 @@ export async function interpretMessageWithAI(message, currentDate) {
       "update_inventory_quantity" -> O usuário quer registrar uma entrada ou saída de um produto no estoque. Extraia a quantidade e o ID do produto.
       "view_inventory" -> O usuário quer listar os produtos de um estoque específico. Extraia o nome do template.
       "set_inventory_alert" -> O usuário quer definir o nível mínimo de estoque para um produto. Extraia o productId e a quantidade.
+      "set_early_reminder" -> O usuário quer definir um lembrete antecipado. Extraia o valor numérico e a unidade (minutos/horas).
       "unknown" → A mensagem não corresponde a nenhuma das intenções acima.
   
   2. Regras de Extração de Dados:
@@ -127,12 +128,13 @@ export async function interpretMessageWithAI(message, currentDate) {
         Seja preciso: "onde" é sobre localização/tipo, "quais" é sobre listar as despesas dia a dia.
       - Se a pergunta envolver **"receitas"**, **"ganhos"** ou **"de onde veio"** e pedir um gráfico → use "generate_income_category_chart".
         Ex: "gráfico dos meus ganhos", "de onde vieram minhas receitas nos últimos 10 dias".
-  
+      - **Prioridade de Lembretes:** Se a frase contiver um comando claro para criar um lembrete (ex: "me lembre", "lembrar de", "anote"), a intenção DEVE ser "reminder". A intenção "set_early_reminder" é APENAS para respostas curtas que definem um tempo (ex: "15 minutos antes", "1 hora").
+
   3. Formato de Resposta:
        Responda apenas com um objeto JSON válido sem qualquer formatação ou explicação adicional
      - Retorne um objeto JSON com a intenção e dados extraídos. Use este formato:
        {
-         "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "delete_list_item" | "generate_daily_chart" | "generate_category_chart" | "generate_income_category_chart" | "get_total_income" |"get_total" | "get_balance" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "google_connect" | "google_disconnect" | "google_status" | "google_enable_sync" | "google_disable_sync" | "google_debug" | "financial_help" | "create_inventory_template" | "add_product_to_inventory" | "list_inventory_templates" | "update_inventory_quantity" | "view_inventory" | "set_inventory_alert" ,
+         "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "delete_list_item" | "generate_daily_chart" | "generate_category_chart" | "generate_income_category_chart" | "get_total_income" |"get_total" | "get_balance" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "google_connect" | "google_disconnect" | "google_status" | "google_enable_sync" | "google_disable_sync" | "google_debug" | "financial_help" | "create_inventory_template" | "add_product_to_inventory" | "list_inventory_templates" | "update_inventory_quantity" | "view_inventory" | "set_inventory_alert" | "set_early_reminder" ,
          "data": {
            "amount": number,
            "description": string,
@@ -317,8 +319,16 @@ export async function interpretMessageWithAI(message, currentDate) {
       Resposta: { "intent": "set_inventory_alert", "data": { "productId": "p0002", "quantity": 5 } }
     - Usuário: "avise-me quando #P0003 estiver com 20"
       Resposta: { "intent": "set_inventory_alert", "data": { "productId": "P0003", "quantity": 20 } }
-     
-  
+    
+    - Usuário: "15 minutos antes"
+      Resposta: { "intent": "set_early_reminder", "data": { "value": 15, "unit": "minutos" } }
+    - Usuário: "sim, me lembre 1 hora antes"
+      Resposta: { "intent": "set_early_reminder", "data": { "value": 1, "unit": "hora" } }
+    - Usuário: "2 horas"
+      Resposta: { "intent": "set_early_reminder", "data": { "value": 2, "unit": "horas" } }
+    - Usuário: "me lembre em 15 minutos" // CONTÉM "me lembre", então NÃO é 'set_early_reminder'
+      Resposta: { "intent": "reminder", "data": { "description": "lembrete", "date": "..." } }
+
   Agora, interprete esta mensagem: "${message}"`;
 
   const response = await openai.chat.completions.create({
