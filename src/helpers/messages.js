@@ -116,7 +116,13 @@ export async function sendReminderMessage(twiml, message, reminderData) {
     max_tokens: 150,
   });
 
-  twiml.message(response.choices[0].message.content);
+  const content = response.choices[0].message.content;
+
+  if (twiml) { 
+    twiml.message(content);
+  } else { 
+    return content;
+  }
 }
 
 export function sendReminderDeletedMessage(twiml, reminderData) {
