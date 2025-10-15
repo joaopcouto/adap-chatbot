@@ -22,6 +22,10 @@ const reminderSchema = new mongoose.Schema({
     status: {          
         type: String,
         default: 'pending'
+    },
+    earlyReminderDate: { 
+        type: Date,
+        required: false 
     }
 }, { timestamps: true }); 
 
