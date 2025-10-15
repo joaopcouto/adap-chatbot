@@ -4,11 +4,7 @@ import { sendTextMessage } from "../services/twilioService.js";
 import { devLog } from "../helpers/logger.js";
 import { generateCorrelationId } from "../helpers/logger.js";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
-import {
-  TIMEZONE,
-  getDateRangeFromPeriod,
-  formatInBrazil,
-} from "../utils/dateUtils.js";
+import { TIMEZONE, formatInBrazil } from "../utils/dateUtils.js";
 
 import {
   interpretMessageWithAI,
@@ -29,6 +25,8 @@ import {
   getActiveInstallments,
   getFormattedInventory,
   getUserCategories,
+  getFormattedCategories,
+  deleteCategoryAndTransactions,
 } from "../helpers/totalUtils.js";
 import {
   generateChart,
@@ -157,7 +155,29 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
         22
       );
 
-      if (previousData.awaiting === "document_category_confirmation") {
+      if (previousData.awaiting === "delete_category_confirmation") {
+        const { categoryName } = previousData.payload;
+
+        if (userMessage.trim().toLowerCase() === 'detalhes') {
+            const result = await getExpenseDetails(userIdString, null, null, categoryName, null, null, null, false);
+            
+            const detailsMessage = result.messages.join('\n\n');
+
+            const finalMessage = `${detailsMessage}\n\nApós revisar, você ainda deseja excluir a categoria *${categoryName}* e todos os lançamentos acima? Responda *sim* para confirmar.`;
+            
+            await sendTextMessage(req.body.From, finalMessage);
+            responseHasBeenSent = true;
+        
+        } else if (userMessage.trim().toLowerCase() === 'sim') {
+            const result = await deleteCategoryAndTransactions(userIdString, categoryName);
+            twiml.message(result.message);
+            delete conversationState[userIdString];
+        
+        } else {
+            twiml.message(`Ok, a exclusão da categoria *${categoryName}* foi cancelada.`);
+            delete conversationState[userIdString];
+        }
+      } else if (previousData.awaiting === "document_category_confirmation") {
         const categoryName = userMessage.trim();
         const { documentType, ...data } = previousData.payload;
 
@@ -1386,7 +1406,7 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                   };
 
                   const originalMessage = await sendReminderMessage(
-                    null, 
+                    null,
                     userMessage,
                     result.reminder
                   );
@@ -1437,6 +1457,53 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                 sendTotalRemindersMessage(twiml, totalReminders);
                 break;
               }
+              case "list_categories": {
+                if (!(await hasAccessToFeature(userObjectId, "categories"))) {
+                  twiml.message(
+                    "🚫 A visualização de categorias personalizadas está disponível apenas como um complemento."
+                  );
+                  break;
+                }
+                const categoriesMessage = await getFormattedCategories(
+                  userIdString
+                );
+                twiml.message(categoriesMessage);
+                break;
+              }
+              case "delete_category": {
+              if (!(await hasAccessToFeature(userObjectId, "categories"))) {
+                twiml.message("🚫 A exclusão de categorias personalizadas está disponível apenas como um complemento.");
+                break;
+              }
+              const { category } = interpretation.data;
+              if (!category) {
+                twiml.message("Por favor, especifique o nome da categoria que deseja excluir. Ex: *excluir categoria lazer*");
+                break;
+              }
+
+              const standardizedName = category.trim().toLowerCase();
+              const categoryDoc = await Category.findOne({ userId: userIdString, name: standardizedName });
+
+              if (!categoryDoc) {
+                twiml.message(`🚫 Categoria "*${category}*" não encontrada.`);
+                break;
+              }
+
+              const transactions = await Transaction.find({ userId: userIdString, categoryId: categoryDoc._id.toString() });
+              const totalAmount = transactions.reduce((sum, t) => sum + t.amount, 0);
+
+              conversationState[userIdString] = {
+                awaiting: "delete_category_confirmation",
+                payload: { categoryName: category }
+              };
+
+              let confirmationMsg = `Você está prestes a excluir a categoria "*${category}*".\n\n`;
+              confirmationMsg += `Isso irá apagar permanentemente *${transactions.length}* lançamento(s), totalizando *R$ ${totalAmount.toFixed(2)}*.\n\n`;
+              confirmationMsg += `Digite *detalhes* para revisar os lançamentos ou responda *sim* para confirmar a exclusão.\n\n_(Esta ação não pode ser desfeita)_`;
+              
+              twiml.message(confirmationMsg);
+              break;
+            }
               case "google_connect": {
                 try {
                   const correlationId = generateCorrelationId();
