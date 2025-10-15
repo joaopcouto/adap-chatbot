@@ -4,7 +4,7 @@ import { sendTextMessage } from "../services/twilioService.js";
 import { devLog } from "../helpers/logger.js";
 import { generateCorrelationId } from "../helpers/logger.js";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
-import { TIMEZONE, getDateRangeFromPeriod, formatInBrazil } from "../utils/dateUtils.js";
+import { TIMEZONE, formatInBrazil } from "../utils/dateUtils.js";
 
 import {
   interpretMessageWithAI,
@@ -25,6 +25,9 @@ import {
   getActiveInstallments,
   getFormattedInventory,
   getUserCategories,
+  getFormattedCategories,
+  deleteCategoryAndTransactions,
+  checkCategoryLimit,
 } from "../helpers/totalUtils.js";
 import {
   generateChart,
@@ -153,7 +156,41 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
         22
       );
 
-      if (previousData.awaiting === "document_category_confirmation") {
+      if (previousData.awaiting === "delete_category_confirmation") {
+        const { categoryName } = previousData.payload;
+
+        if (userMessage.trim().toLowerCase() === "detalhes") {
+          const result = await getExpenseDetails(
+            userIdString,
+            null,
+            null,
+            categoryName,
+            null,
+            null,
+            null,
+            false
+          );
+
+          const detailsMessage = result.messages.join("\n\n");
+
+          const finalMessage = `${detailsMessage}\n\nApós revisar, você ainda deseja excluir a categoria *${categoryName}* e todos os lançamentos acima? Responda *sim* para confirmar.`;
+
+          await sendTextMessage(req.body.From, finalMessage);
+          responseHasBeenSent = true;
+        } else if (userMessage.trim().toLowerCase() === "sim") {
+          const result = await deleteCategoryAndTransactions(
+            userIdString,
+            categoryName
+          );
+          twiml.message(result.message);
+          delete conversationState[userIdString];
+        } else {
+          twiml.message(
+            `Ok, a exclusão da categoria *${categoryName}* foi cancelada.`
+          );
+          delete conversationState[userIdString];
+        }
+      } else if (previousData.awaiting === "document_category_confirmation") {
         const categoryName = userMessage.trim();
         const { documentType, ...data } = previousData.payload;
 
@@ -489,6 +526,59 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
           }
           delete conversationState[userIdString];
         }
+      } else if (previousData.awaiting === "early_reminder_prompt") {
+        try {
+          const interpretation = await interpretMessageWithAI(
+            userMessage,
+            new Date().toISOString()
+          );
+
+          if (interpretation.intent === "set_early_reminder") {
+            const { value, unit } = interpretation.data;
+            const { reminderId } = previousData.payload;
+
+            const reminder = await Reminder.findById(reminderId);
+            if (!reminder) {
+              twiml.message(
+                "Ops, não encontrei o lembrete original. Tente criar um novo."
+              );
+              delete conversationState[userIdString];
+            } else {
+              let earlyDate = new Date(reminder.date);
+              if (unit.includes("minuto")) {
+                earlyDate.setMinutes(earlyDate.getMinutes() - value);
+              } else if (unit.includes("hora")) {
+                earlyDate.setHours(earlyDate.getHours() - value);
+              }
+
+              if (earlyDate < new Date()) {
+                twiml.message(
+                  "Essa antecedência faria o lembrete ser no passado. Por favor, escolha um tempo menor."
+                );
+              } else {
+                await Reminder.updateOne(
+                  { _id: reminder._id },
+                  { $set: { earlyReminderDate: earlyDate } }
+                );
+                twiml.message(
+                  `✅ Confirmado! Irei te lembrar ${value} ${unit} antes.`
+                );
+                delete conversationState[userIdString];
+              }
+            }
+          } else {
+            twiml.message(
+              "Ok, sem problemas! O lembrete principal está mantido. 😉"
+            );
+            delete conversationState[userIdString];
+          }
+        } catch (err) {
+          devLog("Erro ao processar lembrete antecipado:", err);
+          twiml.message(
+            "Ok, sem problemas! O lembrete principal está mantido. 😉"
+          );
+          delete conversationState[userIdString];
+        }
       } else {
         try {
           if (isImage) {
@@ -715,6 +805,17 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                   { upsert: true }
                 );
 
+                const alertMessage = await checkCategoryLimit(
+                  userIdString,
+                  categoryDoc._id.toString(),
+                  amount
+                );
+                if (alertMessage) {
+                  setTimeout(
+                    () => sendTextMessage(req.body.From, alertMessage),
+                    1000
+                  );
+                }
                 break;
               }
               case "add_transaction_new_category": {
@@ -820,8 +921,18 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                     { $inc: { totalSpent: newAmount } },
                     { upsert: true }
                   );
+                  const alertMessage = await checkCategoryLimit(
+                    userIdString,
+                    categoryDoc._id.toString(),
+                    newAmount
+                  );
+                  if (alertMessage) {
+                    setTimeout(
+                      () => sendTextMessage(req.body.From, alertMessage),
+                      1000
+                    );
+                  }
                 }
-
                 break;
               }
               case "get_active_installments": {
@@ -1032,14 +1143,17 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               }
               case "get_total":
               case "get_total_income": {
-                let { category, month, monthName, startDate, endDate } = interpretation.data;
+                let { category, month, monthName, startDate, endDate } =
+                  interpretation.data;
                 let periodName;
 
                 if (!startDate && !month) {
-                  twiml.message("🤔 Não entendi o período. Você pode pedir o total para o mês atual (ex: 'gasto total') ou para um período específico (ex: 'gastos de 25/09 a 07/10').");
+                  twiml.message(
+                    "🤔 Não entendi o período. Você pode pedir o total para o mês atual (ex: 'gasto total') ou para um período específico (ex: 'gastos de 25/09 a 07/10')."
+                  );
                   break;
                 }
-                
+
                 if (startDate && endDate) {
                   const start = new Date(startDate);
                   const end = new Date(endDate);
@@ -1047,59 +1161,93 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                   if (start.toDateString() === end.toDateString()) {
                     periodName = `no dia ${formatInBrazil(start)}`;
                   } else {
-                    periodName = `de ${formatInBrazil(start)} a ${formatInBrazil(end)}`;
+                    periodName = `de ${formatInBrazil(
+                      start
+                    )} a ${formatInBrazil(end)}`;
                   }
                 } else {
                   periodName = `no mês de ${monthName}`;
                 }
 
-                const isIncome = interpretation.intent === 'get_total_income';
+                const isIncome = interpretation.intent === "get_total_income";
 
                 const total = isIncome
-                  ? await calculateTotalIncome(userIdString, month, category, startDate, endDate)
-                  : await calculateTotalExpenses(userIdString, category, month, startDate, endDate); 
-                  
-                if (total === 0) {
-                    let zeroMessage = `🤷‍♀️ Nenhuma movimentação registrada ${periodName}.`;
-                    if (category) {
-                      const catFormatted = category.charAt(0).toUpperCase() + category.slice(1);
-                      zeroMessage = `🤷‍♀️ Nenhum(a) ${isIncome ? "receita" : "gasto"} na categoria _*${catFormatted}*_ ${periodName}.`;
-                    }
-                    twiml.message(zeroMessage);
-                } else {
-                    const typeText = isIncome ? "Receita total" : "Gasto total";
-                    const icon = isIncome ? "📈" : "📉";
-
-                    let responseMessage = `${icon} *${typeText}* ${periodName}: \nR$ ${total.toFixed(2)}`;
-                    if (category) {
-                      const catFormatted = category.charAt(0).toUpperCase() + category.slice(1);
-                      responseMessage = `${icon} *${typeText}* em _*${catFormatted}*_ ${periodName}: \nR$ ${total.toFixed(2)}`;
-                    }
-
-                    responseMessage += `\n\nDigite "detalhes" para ver a lista de itens.`;
-                    
-                    conversationState[userIdString] = {
-                      type: isIncome ? "income" : "expense",
+                  ? await calculateTotalIncome(
+                      userIdString,
+                      month,
                       category,
-                      month,       
-                      monthName,   
-                      startDate,   
-                      endDate,
-                      periodName, 
-                    };
-                    twiml.message(responseMessage);
+                      startDate,
+                      endDate
+                    )
+                  : await calculateTotalExpenses(
+                      userIdString,
+                      category,
+                      month,
+                      startDate,
+                      endDate
+                    );
+
+                if (total === 0) {
+                  let zeroMessage = `🤷‍♀️ Nenhuma movimentação registrada ${periodName}.`;
+                  if (category) {
+                    const catFormatted =
+                      category.charAt(0).toUpperCase() + category.slice(1);
+                    zeroMessage = `🤷‍♀️ Nenhum(a) ${
+                      isIncome ? "receita" : "gasto"
+                    } na categoria _*${catFormatted}*_ ${periodName}.`;
+                  }
+                  twiml.message(zeroMessage);
+                } else {
+                  const typeText = isIncome ? "Receita total" : "Gasto total";
+                  const icon = isIncome ? "📈" : "📉";
+
+                  let responseMessage = `${icon} *${typeText}* ${periodName}: \nR$ ${total.toFixed(
+                    2
+                  )}`;
+                  if (category) {
+                    const catFormatted =
+                      category.charAt(0).toUpperCase() + category.slice(1);
+                    responseMessage = `${icon} *${typeText}* em _*${catFormatted}*_ ${periodName}: \nR$ ${total.toFixed(
+                      2
+                    )}`;
+                  }
+
+                  responseMessage += `\n\nDigite "detalhes" para ver a lista de itens.`;
+
+                  conversationState[userIdString] = {
+                    type: isIncome ? "income" : "expense",
+                    category,
+                    month,
+                    monthName,
+                    startDate,
+                    endDate,
+                    periodName,
+                  };
+                  twiml.message(responseMessage);
                 }
                 break;
               }
               case "get_balance": {
                 const now = new Date();
-                const currentMonthCode = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-                const currentMonthName = now.toLocaleString("pt-BR", { month: "long" }).charAt(0).toUpperCase() + now.toLocaleString("pt-BR", { month: "long" }).slice(1);
+                const currentMonthCode = `${now.getFullYear()}-${String(
+                  now.getMonth() + 1
+                ).padStart(2, "0")}`;
+                const currentMonthName =
+                  now
+                    .toLocaleString("pt-BR", { month: "long" })
+                    .charAt(0)
+                    .toUpperCase() +
+                  now.toLocaleString("pt-BR", { month: "long" }).slice(1);
 
-                const summary = await getMonthlySummary(userIdString, currentMonthCode);
+                const summary = await getMonthlySummary(
+                  userIdString,
+                  currentMonthCode
+                );
 
                 const balancePrefix = summary.balance >= 0 ? "💰" : "⚠️";
-                const balanceMessage = `${balancePrefix} *Saldo de ${currentMonthName}:* *R$ ${summary.balance.toFixed(2)}*`;
+                const balanceMessage = `${balancePrefix} *Saldo de ${currentMonthName}:* *R$ ${summary.balance.toFixed(
+                  2
+                )}*`;
 
                 twiml.message(balanceMessage);
                 break;
@@ -1267,7 +1415,6 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                   break;
                 }
 
-                // Use the new ReminderService for creation with Google Calendar integration
                 const reminderData = {
                   description: description,
                   date: dateToSave,
@@ -1286,11 +1433,22 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                     userPhoneNumberClean,
                     correlationId
                   );
-                  await sendReminderMessage(
-                    twiml,
+
+                  conversationState[userIdString] = {
+                    awaiting: "early_reminder_prompt",
+                    payload: { reminderId: result.reminder._id },
+                  };
+
+                  const originalMessage = await sendReminderMessage(
+                    null,
                     userMessage,
                     result.reminder
                   );
+
+                  const finalMessage = `${originalMessage}\n\n*Gostaria de ser lembrado minutos ou horas antes do seu compromisso?*`;
+
+                  await sendTextMessage(req.body.From, finalMessage);
+                  responseHasBeenSent = true;
                 } catch (error) {
                   devLog(
                     `[Webhook] Error creating reminder for user ${userIdString} (${correlationId}):`,
@@ -1331,6 +1489,112 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               case "get_total_reminders": {
                 const totalReminders = await getTotalReminders(userIdString);
                 sendTotalRemindersMessage(twiml, totalReminders);
+                break;
+              }
+              case "list_categories": {
+                if (!(await hasAccessToFeature(userObjectId, "categories"))) {
+                  twiml.message(
+                    "🚫 A visualização de categorias personalizadas está disponível apenas como um complemento."
+                  );
+                  break;
+                }
+                const categoriesMessage = await getFormattedCategories(
+                  userIdString
+                );
+                twiml.message(categoriesMessage);
+                break;
+              }
+              case "delete_category": {
+                if (!(await hasAccessToFeature(userObjectId, "categories"))) {
+                  twiml.message(
+                    "🚫 A exclusão de categorias personalizadas está disponível apenas como um complemento."
+                  );
+                  break;
+                }
+                const { category } = interpretation.data;
+                if (!category) {
+                  twiml.message(
+                    "Por favor, especifique o nome da categoria que deseja excluir. Ex: *excluir categoria lazer*"
+                  );
+                  break;
+                }
+
+                const standardizedName = category.trim().toLowerCase();
+                const categoryDoc = await Category.findOne({
+                  userId: userIdString,
+                  name: standardizedName,
+                });
+
+                if (!categoryDoc) {
+                  twiml.message(`🚫 Categoria "*${category}*" não encontrada.`);
+                  break;
+                }
+
+                const transactions = await Transaction.find({
+                  userId: userIdString,
+                  categoryId: categoryDoc._id.toString(),
+                });
+                const totalAmount = transactions.reduce(
+                  (sum, t) => sum + t.amount,
+                  0
+                );
+
+                conversationState[userIdString] = {
+                  awaiting: "delete_category_confirmation",
+                  payload: { categoryName: category },
+                };
+
+                let confirmationMsg = `Você está prestes a excluir a categoria "*${category}*".\n\n`;
+                confirmationMsg += `Isso irá apagar permanentemente *${
+                  transactions.length
+                }* lançamento(s), totalizando *R$ ${totalAmount.toFixed(
+                  2
+                )}*.\n\n`;
+                confirmationMsg += `Digite *detalhes* para revisar os lançamentos ou responda *sim* para confirmar a exclusão.\n\n_(Esta ação não pode ser desfeita)_`;
+
+                twiml.message(confirmationMsg);
+                break;
+              }
+              case "set_category_limit": {
+                if (!(await hasAccessToFeature(userObjectId, "categories"))) {
+                  twiml.message(
+                    "🚫 A definição de limites está disponível apenas como um complemento."
+                  );
+                  break;
+                }
+
+                const { category, amount } = interpretation.data;
+
+                if (!category || amount === undefined || amount <= 0) {
+                  twiml.message(
+                    "Formato incorreto. Use: *limite [categoria] para [valor]*. Ex: `limite alimentação para 500`"
+                  );
+                  break;
+                }
+
+                const standardizedName = category.trim().toLowerCase();
+                const categoryDoc = await Category.findOne({
+                  userId: userIdString,
+                  name: standardizedName,
+                });
+
+                if (!categoryDoc) {
+                  twiml.message(
+                    `🚫 Categoria "*${category}*" não encontrada. Crie-a primeiro registrando um gasto nela.`
+                  );
+                  break;
+                }
+
+                await Category.updateOne(
+                  { _id: categoryDoc._id },
+                  { $set: { monthlyLimit: amount } }
+                );
+
+                twiml.message(
+                  `✅ Limite para a categoria "*${category}*" definido para *R$ ${amount.toFixed(
+                    2
+                  )}* por mês.`
+                );
                 break;
               }
               case "google_connect": {
