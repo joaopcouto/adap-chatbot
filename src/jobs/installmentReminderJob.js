@@ -1,7 +1,7 @@
 import cron from "node-cron";
 import Transaction from "../models/Transaction.js";
 import { devLog } from "../helpers/logger.js";
-import { sendTemplateMessage } from "../services/twilioService.js";
+import { sendTemplateMessage } from "../services/whatsappService.js";
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -37,7 +37,7 @@ const processInstallmentReminders = async () => {
     );
 
     
-    const templateSid = process.env.TWILIO_INSTALLMENT_TEMPLATE_SID;
+    
     
 
     for (const transaction of upcomingInstallments) {

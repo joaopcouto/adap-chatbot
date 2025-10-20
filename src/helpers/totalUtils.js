@@ -62,6 +62,8 @@ export async function getMonthlySummary(userId, month) {
 
 export async function calculateTotalIncome(userId, month = null, categoryName = null) {
   try {
+    console.log("calculateTotalIncome called with:", { userId, month, categoryName });
+    
     const pipeline = [];
     let initialMatch = {
       userId: userId,
@@ -82,6 +84,9 @@ export async function calculateTotalIncome(userId, month = null, categoryName = 
           month,
         ],
       };
+      console.log("calculateTotalIncome - Month filter applied:", { month, initialMatch });
+    } else {
+      console.log("calculateTotalIncome - No month filter, querying all time");
     }
     pipeline.push({ $match: initialMatch });
 
@@ -308,9 +313,13 @@ export async function getExpenseDetails(
       itemCounter++;
     }
 
-    const header = categoryName
+    const header = categoryName && monthName
       ? `🧾 Detalhes dos gastos em _*${categoryName}*_ no mês de _*${monthName}*:`
-      : `🧾 Detalhes de todos os gastos no mês de _*${monthName}*_:`;
+      : categoryName
+      ? `🧾 Detalhes dos gastos em _*${categoryName}*_:`
+      : monthName
+      ? `🧾 Detalhes de todos os gastos no mês de _*${monthName}*_:`
+      : `🧾 Detalhes de todos os gastos:`;
 
     const linesToChunk = [header, ...bodyLines];
     const messageChunks = chunkLinesIntoMessages(linesToChunk);
@@ -403,9 +412,13 @@ export async function getIncomeDetails(userId, month, monthName, categoryName) {
       itemCounter++;
     }
     
-    const header = categoryName
+    const header = categoryName && monthName
       ? `🧾 Detalhes das receitas de _*${categoryName}*_ no mês de _*${monthName}*:`
-      : `🧾 Detalhes de todas as receitas no mês de _*${monthName}*_:`;
+      : categoryName
+      ? `🧾 Detalhes das receitas de _*${categoryName}*_:`
+      : monthName
+      ? `🧾 Detalhes de todas as receitas no mês de _*${monthName}*_:`
+      : `🧾 Detalhes de todas as receitas:`;
 
     const linesToChunk = [header, ...bodyLines];
     const messageChunks = chunkLinesIntoMessages(linesToChunk);

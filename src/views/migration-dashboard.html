@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Migration Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .header h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        
+        .status-not_started { background: #e3f2fd; color: #1976d2; }
+        .status-ready { background: #f3e5f5; color: #7b1fa2; }
+        .status-in_progress { background: #fff3e0; color: #f57c00; }
+        .status-ready_for_completion { background: #e8f5e8; color: #388e3c; }
+        .status-completed { background: #e8f5e8; color: #2e7d32; }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .card h3 {
+            color: #2c3e50;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 10px;
+        }
+        
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #ecf0f1;
+        }
+        
+        .metric:last-child {
+            border-bottom: none;
+        }
+        
+        .metric-value {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #ecf0f1;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #3498db, #2ecc71);
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .controls {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .control-group {
+            margin-bottom: 15px;
+        }
+        
+        .control-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 500;
+        }
+        
+        .control-group input, .control-group textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .btn-primary { background: #3498db; color: white; }
+        .btn-primary:hover:not(:disabled) { background: #2980b9; }
+        
+        .btn-success { background: #2ecc71; color: white; }
+        .btn-success:hover:not(:disabled) { background: #27ae60; }
+        
+        .btn-warning { background: #f39c12; color: white; }
+        .btn-warning:hover:not(:disabled) { background: #e67e22; }
+        
+        .btn-danger { background: #e74c3c; color: white; }
+        .btn-danger:hover:not(:disabled) { background: #c0392b; }
+        
+        .btn-secondary { background: #95a5a6; color: white; }
+        .btn-secondary:hover:not(:disabled) { background: #7f8c8d; }
+        
+        .alert {
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        
+        .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .alert-warning { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
+        
+        .logs {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        
+        .routing-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 15px;
+        }
+        
+        .stat-item {
+            text-align: center;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #7f8c8d;
+            text-transform: uppercase;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            .grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .button-group {
+                flex-direction: column;
+            }
+            
+            .routing-stats {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>WhatsApp Migration Dashboard</h1>
+            <p>Manage the migration from Twilio to WhatsApp Cloud API</p>
+            <div id="status-badge" class="status-badge">Loading...</div>
+        </div>
+        
+        <div id="alerts"></div>
+        
+        <div class="grid">
+            <div class="card">
+                <h3>Migration Status</h3>
+                <div class="metric">
+                    <span>Current Status:</span>
+                    <span id="migration-status" class="metric-value">-</span>
+                </div>
+                <div class="metric">
+                    <span>Traffic to Cloud API:</span>
+                    <span id="traffic-percentage" class="metric-value">-</span>
+                </div>
+                <div class="metric">
+                    <span>Migration Mode:</span>
+                    <span id="migration-mode" class="metric-value">-</span>
+                </div>
+                <div class="metric">
+                    <span>Cloud API Enabled:</span>
+                    <span id="cloud-api-enabled" class="metric-value">-</span>
+                </div>
+                
+                <div class="progress-bar">
+                    <div id="progress-fill" class="progress-fill" style="width: 0%">0%</div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h3>Routing Statistics</h3>
+                <div id="routing-stats">
+                    <p>Click "Refresh Stats" to load routing statistics</p>
+                </div>
+                <button class="btn btn-secondary" onclick="refreshRoutingStats()">Refresh Stats</button>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <h3>Migration Controls</h3>
+            
+            <div class="control-group">
+                <label for="traffic-input">Traffic Percentage (0-100):</label>
+                <input type="number" id="traffic-input" min="0" max="100" value="0">
+            </div>
+            
+            <div class="control-group">
+                <label for="reason-input">Reason for Change:</label>
+                <textarea id="reason-input" rows="2" placeholder="Enter reason for this change..."></textarea>
+            </div>
+            
+            <div class="button-group">
+                <button id="start-btn" class="btn btn-primary" onclick="startMigration()">Start Migration</button>
+                <button id="update-traffic-btn" class="btn btn-warning" onclick="updateTraffic()">Update Traffic</button>
+                <button id="complete-btn" class="btn btn-success" onclick="completeMigration()">Complete Migration</button>
+                <button id="rollback-btn" class="btn btn-danger" onclick="rollbackMigration()">Rollback</button>
+                <button class="btn btn-secondary" onclick="refreshStatus()">Refresh Status</button>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h3>Activity Log</h3>
+            <div id="activity-log" class="logs">Dashboard loaded. Click "Refresh Status" to load current migration status.</div>
+        </div>
+    </div>
+
+    <script>
+        let currentStatus = {};
+        
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshStatus();
+            
+            // Auto-refresh every 30 seconds
+            setInterval(refreshStatus, 30000);
+        });
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logElement = document.getElementById('activity-log');
+            const logEntry = `[${timestamp}] ${message}\n`;
+            logElement.textContent += logEntry;
+            logElement.scrollTop = logElement.scrollHeight;
+            
+            console.log(`[Migration Dashboard] ${message}`);
+        }
+        
+        function showAlert(message, type = 'success') {
+            const alertsContainer = document.getElementById('alerts');
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type}`;
+            alertDiv.textContent = message;
+            
+            alertsContainer.appendChild(alertDiv);
+            
+            // Remove alert after 5 seconds
+            setTimeout(() => {
+                alertDiv.remove();
+            }, 5000);
+        }
+        
+        async function apiCall(endpoint, method = 'GET', body = null) {
+            try {
+                const options = {
+                    method,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                };
+                
+                if (body) {
+                    options.body = JSON.stringify(body);
+                }
+                
+                const response = await fetch(`/api/migration${endpoint}`, options);
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'API request failed');
+                }
+                
+                return data;
+            } catch (error) {
+                log(`API Error: ${error.message}`, 'error');
+                showAlert(`Error: ${error.message}`, 'error');
+                throw error;
+            }
+        }
+        
+        async function refreshStatus() {
+            try {
+                log('Refreshing migration status...');
+                const response = await apiCall('/status');
+                currentStatus = response.data;
+                
+                updateStatusDisplay();
+                updateControls();
+                
+                log('Status refreshed successfully');
+            } catch (error) {
+                log(`Failed to refresh status: ${error.message}`);
+            }
+        }
+        
+        function updateStatusDisplay() {
+            const status = currentStatus;
+            
+            // Update status badge
+            const statusBadge = document.getElementById('status-badge');
+            statusBadge.textContent = status.status.replace('_', ' ').toUpperCase();
+            statusBadge.className = `status-badge status-${status.status}`;
+            
+            // Update metrics
+            document.getElementById('migration-status').textContent = status.status.replace('_', ' ');
+            document.getElementById('traffic-percentage').textContent = `${status.trafficPercentage}%`;
+            document.getElementById('migration-mode').textContent = status.migrationMode ? 'Enabled' : 'Disabled';
+            document.getElementById('cloud-api-enabled').textContent = status.cloudApiEnabled ? 'Yes' : 'No';
+            
+            // Update progress bar
+            const progressFill = document.getElementById('progress-fill');
+            progressFill.style.width = `${status.trafficPercentage}%`;
+            progressFill.textContent = `${status.trafficPercentage}%`;
+            
+            // Update traffic input
+            document.getElementById('traffic-input').value = status.trafficPercentage;
+        }
+        
+        function updateControls() {
+            const status = currentStatus;
+            
+            document.getElementById('start-btn').disabled = !status.canStart;
+            document.getElementById('update-traffic-btn').disabled = !status.canIncrease && !status.canDecrease;
+            document.getElementById('complete-btn').disabled = !status.canComplete;
+            document.getElementById('rollback-btn').disabled = !status.canRollback;
+        }
+        
+        async function startMigration() {
+            const initialPercentage = parseInt(document.getElementById('traffic-input').value) || 5;
+            const reason = document.getElementById('reason-input').value || 'Migration started via dashboard';
+            
+            try {
+                log(`Starting migration with ${initialPercentage}% traffic...`);
+                const response = await apiCall('/start', 'POST', { initialPercentage, reason });
+                
+                showAlert(response.data.message, 'success');
+                log(`Migration started: ${response.data.message}`);
+                
+                await refreshStatus();
+            } catch (error) {
+                log(`Failed to start migration: ${error.message}`);
+            }
+        }
+        
+        async function updateTraffic() {
+            const percentage = parseInt(document.getElementById('traffic-input').value);
+            const reason = document.getElementById('reason-input').value || 'Traffic updated via dashboard';
+            
+            if (isNaN(percentage) || percentage < 0 || percentage > 100) {
+                showAlert('Please enter a valid percentage between 0 and 100', 'error');
+                return;
+            }
+            
+            try {
+                log(`Updating traffic to ${percentage}%...`);
+                const response = await apiCall('/traffic', 'PUT', { percentage, reason });
+                
+                showAlert(`Traffic updated to ${percentage}%`, 'success');
+                log(`Traffic updated: ${percentage}%`);
+                
+                await refreshStatus();
+            } catch (error) {
+                log(`Failed to update traffic: ${error.message}`);
+            }
+        }
+        
+        async function completeMigration() {
+            const reason = document.getElementById('reason-input').value || 'Migration completed via dashboard';
+            
+            if (!confirm('Are you sure you want to complete the migration? This will route all traffic to Cloud API.')) {
+                return;
+            }
+            
+            try {
+                log('Completing migration...');
+                const response = await apiCall('/complete', 'POST', { reason });
+                
+                showAlert(response.data.message, 'success');
+                log(`Migration completed: ${response.data.message}`);
+                
+                await refreshStatus();
+            } catch (error) {
+                log(`Failed to complete migration: ${error.message}`);
+            }
+        }
+        
+        async function rollbackMigration() {
+            const reason = document.getElementById('reason-input').value || 'Migration rolled back via dashboard';
+            
+            if (!confirm('Are you sure you want to rollback the migration? This will route all traffic back to Twilio.')) {
+                return;
+            }
+            
+            try {
+                log('Rolling back migration...');
+                const response = await apiCall('/rollback', 'POST', { reason });
+                
+                showAlert(response.data.message, 'warning');
+                log(`Migration rolled back: ${response.data.message}`);
+                
+                await refreshStatus();
+            } catch (error) {
+                log(`Failed to rollback migration: ${error.message}`);
+            }
+        }
+        
+        async function refreshRoutingStats() {
+            try {
+                log('Refreshing routing statistics...');
+                const response = await apiCall('/routing-stats', 'POST', { sampleSize: 1000 });
+                const stats = response.data;
+                
+                const statsContainer = document.getElementById('routing-stats');
+                statsContainer.innerHTML = `
+                    <div class="routing-stats">
+                        <div class="stat-item">
+                            <div class="stat-value">${stats.cloudApi.count}</div>
+                            <div class="stat-label">Cloud API Users</div>
+                            <div style="font-size: 14px; color: #2c3e50;">${stats.cloudApi.percentage.toFixed(1)}%</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value">${stats.twilio.count}</div>
+                            <div class="stat-label">Twilio Users</div>
+                            <div style="font-size: 14px; color: #2c3e50;">${stats.twilio.percentage.toFixed(1)}%</div>
+                        </div>
+                    </div>
+                    <div class="metric">
+                        <span>Expected Cloud API %:</span>
+                        <span class="metric-value">${stats.expectedCloudApiPercentage}%</span>
+                    </div>
+                    <div class="metric">
+                        <span>Actual Deviation:</span>
+                        <span class="metric-value">${stats.deviation.toFixed(2)}%</span>
+                    </div>
+                    <div class="metric">
+                        <span>Sample Size:</span>
+                        <span class="metric-value">${stats.total}</span>
+                    </div>
+                `;
+                
+                log('Routing statistics refreshed');
+            } catch (error) {
+                log(`Failed to refresh routing statistics: ${error.message}`);
+            }
+        }
+    </script>
+</body>
+</html>

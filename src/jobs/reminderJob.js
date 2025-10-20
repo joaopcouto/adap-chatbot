@@ -1,6 +1,6 @@
 import cron from "node-cron";
 import Reminder from "../models/Reminder.js";
-import { sendTemplateMessage } from "../services/twilioService.js";
+import CloudApiService from "../services/cloudApiService.js";
 import { devLog } from "../helpers/logger.js";
 import { formatPhoneNumber } from "../utils/formatPhone.js";
 import dotenv from 'dotenv';
@@ -39,14 +39,11 @@ async function checkAndSendReminders() {
           continue;
         }
 
-        const templateSid = process.env.TWILIO_REMINDER_TEMPLATE_SID;
+        const message = `🔔 Lembrete: ${reminder.description}`;
 
-        const templateVariables = {
-          1: reminder.description,
-        };
-
-        devLog("[ReminderJob] MODO PRODUÇÃO: Enviando template real.");
-        await sendTemplateMessage(recipient, templateSid, templateVariables);
+        devLog("[ReminderJob] MODO PRODUÇÃO: Enviando via Cloud API.");
+        const cloudApiService = new CloudApiService();
+        await cloudApiService.sendTextMessage(recipient, message);
         
         devLog(
           `[ReminderJob] Lembrete #${reminder.messageId} enviado via template para ${recipient}.`

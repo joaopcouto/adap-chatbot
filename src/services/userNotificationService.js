@@ -1,5 +1,5 @@
 import { structuredLogger } from '../helpers/logger.js';
-import { sendTextMessage } from './twilioService.js';
+import { sendTextMessage } from './whatsappService.js';
 import UserGoogleIntegration from '../models/UserGoogleIntegration.js';
 import User from '../models/User.js';
 

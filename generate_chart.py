@@ -25,8 +25,8 @@ output_image_path = get_absolute_path(sys.argv[2])
 
 try:
     num_days = int(sys.argv[3])
-    if num_days <= 0 or num_days > 7:
-        print(f"Número de dias ({num_days}) inválido. O período deve ser entre 1 e 7 dias.", file=sys.stderr)
+    if num_days <= 0 or num_days > 30:
+        print(f"Número de dias ({num_days}) inválido. O período deve ser entre 1 e 30 dias.", file=sys.stderr)
         sys.exit(1)
 except ValueError:
     print("Erro: O número de dias deve ser um inteiro.", file=sys.stderr)

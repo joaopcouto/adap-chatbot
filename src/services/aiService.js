@@ -12,36 +12,193 @@ const openai = new OpenAI({
 
 const pipeline = promisify(stream.pipeline);
 
-export async function transcribeAudioWithWhisper(audioUrl) {
+export async function transcribeAudioWithWhisper(audioInput) {
+  const startTime = Date.now();
+  let tempFilePath = null;
+  let isLocalFile = false;
+  
   try {
-    const response = await axios({
-      method: "get",
-      url: audioUrl,
-      responseType: "stream",
-      auth: {
-        username: process.env.TWILIO_ACCOUNT_SID,
-        password: process.env.TWILIO_AUTH_TOKEN,
-      },
-    });
-
-    const tempFilePath = path.join("/tmp", `user_audio_${Date.now()}.ogg`);
-
-    await pipeline(response.data, fs.createWriteStream(tempFilePath));
-
-    const transcription = await openai.audio.transcriptions.create({
-      file: fs.createReadStream(tempFilePath),
-      model: "whisper-1",
-      language: "pt",
-    });
-
-    if (fs.existsSync(tempFilePath)) {
-      fs.unlinkSync(tempFilePath);
+    // Input validation
+    if (!audioInput || typeof audioInput !== 'string') {
+      devLog("Audio transcription failed: Invalid audio input provided", { audioInput });
+      throw new Error("Entrada de áudio inválida fornecida");
     }
 
-    return transcription.text;
+    // Check if input is a local file path or URL
+    isLocalFile = !audioInput.startsWith('http://') && !audioInput.startsWith('https://');
+    
+    if (isLocalFile) {
+      // Input is a local file path
+      if (!fs.existsSync(audioInput)) {
+        devLog("Audio transcription failed: Local file not found", { audioInput });
+        throw new Error("Arquivo de áudio não encontrado");
+      }
+      tempFilePath = audioInput;
+      devLog("Starting audio transcription from local file", { filePath: audioInput, startTime });
+    } else {
+      // Input is a URL - existing behavior
+      devLog("Starting audio transcription from URL", { audioUrl: audioInput, startTime });
+    }
+
+    // Set timeout for the entire operation (30 seconds)
+    const timeoutMs = parseInt(process.env.AUDIO_PROCESSING_TIMEOUT) || 30000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      devLog("Audio transcription timeout", { audioInput, timeoutMs });
+    }, timeoutMs);
+
+    try {
+      // Download audio only if input is a URL
+      if (!isLocalFile) {
+        const response = await axios({
+          method: "get",
+          url: audioInput,
+          responseType: "stream",
+          signal: controller.signal,
+          timeout: 15000, // 15 seconds for download
+          maxContentLength: 16 * 1024 * 1024, // 16MB limit
+          validateStatus: (status) => status === 200
+        });
+
+        // Validate content type
+        const contentType = response.headers['content-type'];
+        if (!contentType || !contentType.startsWith('audio/')) {
+          devLog("Audio transcription failed: Invalid content type", { contentType, audioInput });
+          throw new Error("Arquivo não é um áudio válido");
+        }
+
+        // Create temp file with unique name
+        tempFilePath = path.join("/tmp", `user_audio_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.ogg`);
+        
+        devLog("Downloading audio file", { tempFilePath, contentType });
+
+        // Download with pipeline and timeout
+        await pipeline(response.data, fs.createWriteStream(tempFilePath));
+      }
+
+      // Validate file exists and has content (for both local files and downloaded files)
+      if (!fs.existsSync(tempFilePath)) {
+        throw new Error("Arquivo de áudio não encontrado");
+      }
+
+      const fileStats = fs.statSync(tempFilePath);
+      if (fileStats.size === 0) {
+        devLog("Audio transcription failed: Empty file", { tempFilePath, audioInput });
+        throw new Error("Arquivo de áudio vazio");
+      }
+
+      if (fileStats.size > 16 * 1024 * 1024) { // 16MB limit
+        devLog("Audio transcription failed: File too large", { fileSize: fileStats.size, audioInput });
+        throw new Error("Arquivo de áudio muito grande (máximo 16MB)");
+      }
+
+      devLog("Audio file downloaded successfully", { 
+        tempFilePath, 
+        fileSize: fileStats.size,
+        downloadTime: Date.now() - startTime 
+      });
+
+      // Transcribe with OpenAI Whisper
+      const transcriptionStartTime = Date.now();
+      const transcription = await openai.audio.transcriptions.create({
+        file: fs.createReadStream(tempFilePath),
+        model: process.env.WHISPER_MODEL || "whisper-1",
+        language: process.env.WHISPER_LANGUAGE || "pt",
+      });
+
+      clearTimeout(timeoutId);
+
+      // Validate transcription output
+      if (!transcription || !transcription.text) {
+        devLog("Audio transcription failed: Empty transcription result", { audioInput });
+        throw new Error("Transcrição resultou em texto vazio");
+      }
+
+      const transcriptionText = transcription.text.trim();
+      if (transcriptionText.length === 0) {
+        devLog("Audio transcription failed: Empty transcription text", { audioInput });
+        throw new Error("Não foi possível extrair texto do áudio");
+      }
+
+      if (transcriptionText.length > 1000) {
+        devLog("Audio transcription warning: Very long transcription", { 
+          audioInput, 
+          textLength: transcriptionText.length 
+        });
+      }
+
+      const totalTime = Date.now() - startTime;
+      const transcriptionTime = Date.now() - transcriptionStartTime;
+
+      devLog("Audio transcription completed successfully", {
+        audioInput,
+        textLength: transcriptionText.length,
+        totalTime,
+        transcriptionTime,
+        fileSize: fileStats.size
+      });
+
+      return transcriptionText;
+
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
   } catch (error) {
-    console.error("Erro no processo de transcrição com Whisper:", error);
-    throw new Error("Falha ao transcrever o áudio.");
+    const totalTime = Date.now() - startTime;
+    
+    // Enhanced error logging with context
+    const errorContext = {
+      audioInput,
+      tempFilePath,
+      totalTime,
+      errorType: error.constructor.name,
+      errorMessage: error.message
+    };
+
+    if (error.code === 'ECONNABORTED' || error.name === 'AbortError') {
+      devLog("Audio transcription timeout error", errorContext);
+      throw new Error("Tempo limite excedido para processar o áudio");
+    }
+
+    if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+      devLog("Audio transcription network error", errorContext);
+      throw new Error("Erro de rede ao baixar o áudio");
+    }
+
+    if (error.response?.status === 404) {
+      devLog("Audio transcription file not found", errorContext);
+      throw new Error("Arquivo de áudio não encontrado");
+    }
+
+    if (error.response?.status === 403) {
+      devLog("Audio transcription access denied", errorContext);
+      throw new Error("Acesso negado ao arquivo de áudio");
+    }
+
+    if (error.message?.includes('OpenAI')) {
+      devLog("Audio transcription OpenAI API error", errorContext);
+      throw new Error("Erro no serviço de transcrição");
+    }
+
+    devLog("Audio transcription unexpected error", errorContext);
+    throw new Error("Falha ao transcrever o áudio");
+
+  } finally {
+    // Cleanup: Only remove temp file if we created it (downloaded from URL)
+    // If it's a local file passed to us, let the caller handle cleanup
+    if (tempFilePath && !isLocalFile && fs.existsSync(tempFilePath)) {
+      try {
+        fs.unlinkSync(tempFilePath);
+        devLog("Temporary audio file cleaned up", { tempFilePath });
+      } catch (cleanupError) {
+        devLog("Failed to cleanup temporary audio file", { 
+          tempFilePath, 
+          cleanupError: cleanupError.message 
+        });
+      }
+    }
   }
 }
 
@@ -337,14 +494,63 @@ export async function interpretDocumentWithAI(imageUrl) {
   }`;
 
   try {
-    const imageResponse = await axios({
-      method: 'get', url: imageUrl, responseType: 'arraybuffer',
-      auth: { username: process.env.TWILIO_ACCOUNT_SID, password: process.env.TWILIO_AUTH_TOKEN },
-    });
+    let base64Image;
+    let mimeType;
 
-    const base64Image = Buffer.from(imageResponse.data, 'binary').toString('base64');
-    const mimeType = imageResponse.headers['content-type'];
+    // Check if imageUrl is already a data URL
+    if (imageUrl.startsWith('data:')) {
+      // Extract MIME type and base64 data from data URL
+      const dataUrlMatch = imageUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (!dataUrlMatch) {
+        throw new Error('Invalid data URL format');
+      }
+      mimeType = dataUrlMatch[1];
+      base64Image = dataUrlMatch[2];
+      
+      console.log('Processing data URL - MIME type:', mimeType);
+      console.log('Base64 data length:', base64Image.length);
+      
+      // Validate MIME type for OpenAI compatibility
+      const supportedMimeTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+      if (!supportedMimeTypes.includes(mimeType)) {
+        throw new Error(`Unsupported MIME type for OpenAI: ${mimeType}. Supported types: ${supportedMimeTypes.join(', ')}`);
+      }
+      
+      // Validate base64 content
+      if (!base64Image || base64Image.length === 0) {
+        throw new Error('Empty or invalid base64 image data');
+      }
+    } else {
+      // Download image from HTTP URL
+      const imageResponse = await axios({
+        method: 'get', 
+        url: imageUrl, 
+        responseType: 'arraybuffer'
+      });
 
+      base64Image = Buffer.from(imageResponse.data, 'binary').toString('base64');
+      mimeType = imageResponse.headers['content-type'];
+      
+      console.log('Processing HTTP URL - MIME type:', mimeType);
+      console.log('Base64 data length:', base64Image.length);
+      
+      // Validate MIME type for OpenAI compatibility
+      const supportedMimeTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+      if (!supportedMimeTypes.includes(mimeType)) {
+        throw new Error(`Unsupported MIME type for OpenAI: ${mimeType}. Supported types: ${supportedMimeTypes.join(', ')}`);
+      }
+      
+      // Validate base64 content
+      if (!base64Image || base64Image.length === 0) {
+        throw new Error('Empty or invalid base64 image data');
+      }
+    }
+
+    // Create the data URL for OpenAI
+    const dataUrl = `data:${mimeType};base64,${base64Image}`;
+    console.log('Sending to OpenAI - Data URL length:', dataUrl.length);
+    console.log('Sending to OpenAI - MIME type:', mimeType);
+    
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
@@ -354,7 +560,7 @@ export async function interpretDocumentWithAI(imageUrl) {
             { type: "text", text: prompt },
             {
               type: "image_url",
-              image_url: { url: `data:${mimeType};base64,${base64Image}` },
+              image_url: { url: dataUrl },
             },
           ],
         },
@@ -369,6 +575,20 @@ export async function interpretDocumentWithAI(imageUrl) {
 
   } catch (error) {
     console.error("Erro no processo de interpretação de documento:", error);
+    
+    // Log more details about the error
+    if (error.response) {
+      console.error("OpenAI API Response Error:", {
+        status: error.response.status,
+        statusText: error.response.statusText,
+        data: error.response.data
+      });
+    }
+    
+    if (error.message?.includes('Invalid MIME type')) {
+      console.error("MIME type issue detected. Check if the image data is properly formatted.");
+    }
+    
     return { documentType: 'unknown', data: null };
   }
 }

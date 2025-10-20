@@ -57,7 +57,7 @@ class StructuredLogger {
       timestamp,
       level,
       message,
-      service: 'google-calendar-integration'
+      service: this._determineService(context)
     };
 
     // Add sanitized context
@@ -68,12 +68,55 @@ class StructuredLogger {
       logEntry.correlationId = context.correlationId;
     }
 
+    // Ensure request ID is preserved for Cloud API operations
+    if (context.requestId) {
+      logEntry.requestId = context.requestId;
+    }
+
+    // Add Cloud API specific fields
+    if (context.provider === 'cloud-api' || context.operation?.includes('CloudApi') || context.service === 'CloudApiService') {
+      logEntry.provider = 'cloud-api';
+      logEntry.apiVersion = context.apiVersion || 'v18.0';
+      
+      // Add performance metrics if available
+      if (context.duration !== undefined) {
+        logEntry.performance = {
+          duration: context.duration,
+          timestamp: timestamp
+        };
+      }
+
+      // Add Cloud API specific context
+      if (context.messageId) logEntry.messageId = context.messageId;
+      if (context.phoneNumberId) logEntry.phoneNumberId = context.phoneNumberId;
+      if (context.businessAccountId) logEntry.businessAccountId = context.businessAccountId;
+      if (context.templateName) logEntry.templateName = context.templateName;
+      if (context.mediaType) logEntry.mediaType = context.mediaType;
+      if (context.endpoint) logEntry.endpoint = context.endpoint;
+      if (context.method) logEntry.method = context.method;
+      if (context.status) logEntry.status = context.status;
+    }
+
     // Additional sanitization for error objects
     if (logEntry.error && typeof logEntry.error === 'object') {
       logEntry.error = this._sanitizeError(logEntry.error);
     }
 
     return logEntry;
+  }
+
+  /**
+   * Determine service name based on context
+   * @param {Object} context - Log context
+   * @returns {string} Service name
+   */
+  _determineService(context) {
+    if (context.service) return context.service;
+    if (context.provider === 'cloud-api') return 'whatsapp-cloud-api';
+    if (context.operation?.includes('CloudApi')) return 'whatsapp-cloud-api';
+    if (context.operation?.includes('Twilio')) return 'whatsapp-twilio';
+    if (context.operation?.includes('GoogleCalendar')) return 'google-calendar-integration';
+    return 'whatsapp-service';
   }
 
   /**
@@ -325,6 +368,182 @@ class StructuredLogger {
       userId,
       notificationType,
       type: 'USER_NOTIFICATION'
+    });
+  }
+
+  /**
+   * Log Cloud API operation start
+   * @param {string} operation - Operation name (e.g., 'sendTextMessage', 'sendTemplateMessage')
+   * @param {Object} context - Operation context
+   */
+  cloudApiOperationStart(operation, context = {}) {
+    this.info(`Cloud API operation started: ${operation}`, {
+      ...context,
+      operation,
+      provider: 'cloud-api',
+      phase: 'START',
+      type: 'CLOUD_API_OPERATION'
+    });
+  }
+
+  /**
+   * Log Cloud API operation success
+   * @param {string} operation - Operation name
+   * @param {Object} context - Operation context including performance metrics
+   */
+  cloudApiOperationSuccess(operation, context = {}) {
+    this.info(`Cloud API operation completed successfully: ${operation}`, {
+      ...context,
+      operation,
+      provider: 'cloud-api',
+      phase: 'SUCCESS',
+      type: 'CLOUD_API_OPERATION'
+    });
+  }
+
+  /**
+   * Log Cloud API operation failure
+   * @param {string} operation - Operation name
+   * @param {Error} error - Error that occurred
+   * @param {Object} context - Operation context
+   */
+  cloudApiOperationFailure(operation, error, context = {}) {
+    this.error(`Cloud API operation failed: ${operation}`, {
+      ...context,
+      operation,
+      provider: 'cloud-api',
+      phase: 'FAILURE',
+      type: 'CLOUD_API_OPERATION',
+      error: this._sanitizeError(error)
+    });
+  }
+
+  /**
+   * Log Cloud API request metrics
+   * @param {string} endpoint - API endpoint called
+   * @param {string} method - HTTP method
+   * @param {number} duration - Request duration in ms
+   * @param {number} status - HTTP status code
+   * @param {Object} context - Additional context
+   */
+  cloudApiRequestMetrics(endpoint, method, duration, status, context = {}) {
+    const level = status >= 400 ? 'WARN' : 'INFO';
+    const message = `Cloud API request completed: ${method} ${endpoint}`;
+    
+    this[level.toLowerCase()](message, {
+      ...context,
+      endpoint,
+      method,
+      duration,
+      status,
+      provider: 'cloud-api',
+      type: 'API_METRICS',
+      performance: {
+        duration,
+        timestamp: new Date().toISOString()
+      }
+    });
+  }
+
+  /**
+   * Log Cloud API rate limiting events
+   * @param {string} endpoint - API endpoint that was rate limited
+   * @param {number} retryAfter - Seconds to wait before retry
+   * @param {Object} context - Additional context
+   */
+  cloudApiRateLimit(endpoint, retryAfter, context = {}) {
+    this.warn(`Cloud API rate limit hit: ${endpoint}`, {
+      ...context,
+      endpoint,
+      retryAfter,
+      provider: 'cloud-api',
+      type: 'RATE_LIMIT',
+      rateLimitInfo: {
+        endpoint,
+        retryAfter,
+        timestamp: new Date().toISOString()
+      }
+    });
+  }
+
+  /**
+   * Log Cloud API authentication events
+   * @param {string} event - Authentication event (e.g., 'token_refresh', 'auth_failure')
+   * @param {Object} context - Additional context
+   */
+  cloudApiAuth(event, context = {}) {
+    const level = event.includes('failure') || event.includes('error') ? 'ERROR' : 'INFO';
+    
+    this[level](`Cloud API authentication event: ${event}`, {
+      ...context,
+      event,
+      provider: 'cloud-api',
+      type: 'AUTHENTICATION'
+    });
+  }
+
+  /**
+   * Log Cloud API webhook events
+   * @param {string} event - Webhook event type
+   * @param {Object} context - Webhook context
+   */
+  cloudApiWebhook(event, context = {}) {
+    this.info(`Cloud API webhook received: ${event}`, {
+      ...context,
+      event,
+      provider: 'cloud-api',
+      type: 'WEBHOOK'
+    });
+  }
+
+  /**
+   * Log Cloud API message delivery status
+   * @param {string} messageId - Message ID
+   * @param {string} status - Delivery status
+   * @param {Object} context - Additional context
+   */
+  cloudApiMessageStatus(messageId, status, context = {}) {
+    const level = ['failed', 'undelivered'].includes(status) ? 'warn' : 'info';
+    
+    this[level](`Cloud API message status update: ${status}`, {
+      ...context,
+      messageId,
+      status,
+      provider: 'cloud-api',
+      type: 'MESSAGE_STATUS'
+    });
+  }
+
+  /**
+   * Log Cloud API media processing events
+   * @param {string} operation - Media operation (e.g., 'upload', 'download', 'validate')
+   * @param {Object} context - Media context
+   */
+  cloudApiMedia(operation, context = {}) {
+    this.info(`Cloud API media operation: ${operation}`, {
+      ...context,
+      operation,
+      provider: 'cloud-api',
+      type: 'MEDIA_PROCESSING'
+    });
+  }
+
+  /**
+   * Log performance metrics for Cloud API operations
+   * @param {string} operation - Operation name
+   * @param {Object} metrics - Performance metrics
+   * @param {Object} context - Additional context
+   */
+  cloudApiPerformanceMetrics(operation, metrics, context = {}) {
+    this.info(`Cloud API performance metrics: ${operation}`, {
+      ...context,
+      operation,
+      provider: 'cloud-api',
+      type: 'PERFORMANCE_METRICS',
+      metrics: {
+        ...metrics,
+        timestamp: new Date().toISOString()
+      }
     });
   }
 }

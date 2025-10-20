@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Cloud API Monitoring Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #25D366, #128C7E);
+            color: white;
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
+        }
+
+        .header .subtitle {
+            opacity: 0.9;
+            font-size: 0.9rem;
+            margin-top: 0.25rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .status-card {
+            background: white;
+            padding: 1rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            flex: 1;
+            min-width: 200px;
+            border-left: 4px solid #ddd;
+        }
+
+        .status-card.healthy {
+            border-left-color: #25D366;
+        }
+
+        .status-card.unhealthy {
+            border-left-color: #dc3545;
+        }
+
+        .status-card.warning {
+            border-left-color: #ffc107;
+        }
+
+        .status-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .status-label {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .card-header {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-bottom: 1px solid #dee2e6;
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .card-body {
+            padding: 1rem;
+        }
+
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .metric-row:last-child {
+            border-bottom: none;
+        }
+
+        .metric-label {
+            color: #666;
+        }
+
+        .metric-value {
+            font-weight: 600;
+        }
+
+        .alert {
+            padding: 0.75rem 1rem;
+            margin-bottom: 0.5rem;
+            border-radius: 4px;
+            border-left: 4px solid;
+        }
+
+        .alert.critical {
+            background-color: #f8d7da;
+            border-left-color: #dc3545;
+            color: #721c24;
+        }
+
+        .alert.warning {
+            background-color: #fff3cd;
+            border-left-color: #ffc107;
+            color: #856404;
+        }
+
+        .alert-time {
+            font-size: 0.8rem;
+            opacity: 0.8;
+            margin-top: 0.25rem;
+        }
+
+        .refresh-btn {
+            background: #25D366;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+
+        .refresh-btn:hover {
+            background: #128C7E;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+
+        .timestamp {
+            text-align: center;
+            color: #666;
+            font-size: 0.8rem;
+            margin-top: 1rem;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            .status-bar {
+                flex-direction: column;
+            }
+            
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>WhatsApp Cloud API Monitoring</h1>
+        <div class="subtitle">Real-time monitoring and alerting dashboard</div>
+    </div>
+
+    <div class="container">
+        <button class="refresh-btn" onclick="refreshDashboard()">🔄 Refresh Data</button>
+        
+        <div id="error-container"></div>
+        <div id="loading" class="loading">Loading dashboard data...</div>
+        
+        <div id="dashboard-content" style="display: none;">
+            <!-- Status Overview -->
+            <div class="status-bar">
+                <div class="status-card" id="overall-status">
+                    <div class="status-value" id="status-value">-</div>
+                    <div class="status-label">Overall Status</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-value" id="success-rate">-</div>
+                    <div class="status-label">Success Rate</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-value" id="avg-response-time">-</div>
+                    <div class="status-label">Avg Response Time</div>
+                </div>
+                <div class="status-card">
+                    <div class="status-value" id="total-requests">-</div>
+                    <div class="status-label">Total Requests</div>
+                </div>
+            </div>
+
+            <!-- Main Grid -->
+            <div class="grid">
+                <!-- Performance Metrics -->
+                <div class="card">
+                    <div class="card-header">Performance Metrics</div>
+                    <div class="card-body">
+                        <div class="metric-row">
+                            <span class="metric-label">Average Response Time</span>
+                            <span class="metric-value" id="perf-avg-time">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">95th Percentile</span>
+                            <span class="metric-value" id="perf-p95-time">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Min Response Time</span>
+                            <span class="metric-value" id="perf-min-time">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Max Response Time</span>
+                            <span class="metric-value" id="perf-max-time">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Requests/Minute</span>
+                            <span class="metric-value" id="perf-rpm">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Request Statistics -->
+                <div class="card">
+                    <div class="card-header">Request Statistics</div>
+                    <div class="card-body">
+                        <div class="metric-row">
+                            <span class="metric-label">Total Requests</span>
+                            <span class="metric-value" id="req-total">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Successful</span>
+                            <span class="metric-value" id="req-successful">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Failed</span>
+                            <span class="metric-value" id="req-failed">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Success Rate</span>
+                            <span class="metric-value" id="req-success-rate">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Error Rate</span>
+                            <span class="metric-value" id="req-error-rate">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Message Statistics -->
+                <div class="card">
+                    <div class="card-header">Message Statistics</div>
+                    <div class="card-body">
+                        <div class="metric-row">
+                            <span class="metric-label">Messages Sent</span>
+                            <span class="metric-value" id="msg-sent">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Messages Delivered</span>
+                            <span class="metric-value" id="msg-delivered">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Messages Failed</span>
+                            <span class="metric-value" id="msg-failed">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Delivery Rate</span>
+                            <span class="metric-value" id="msg-delivery-rate">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Text Messages</span>
+                            <span class="metric-value" id="msg-text">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Error Statistics -->
+                <div class="card">
+                    <div class="card-header">Error Statistics</div>
+                    <div class="card-body">
+                        <div class="metric-row">
+                            <span class="metric-label">Total Errors</span>
+                            <span class="metric-value" id="err-total">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Rate Limit Hits</span>
+                            <span class="metric-value" id="err-rate-limits">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Auth Failures</span>
+                            <span class="metric-value" id="err-auth-failures">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Network Errors</span>
+                            <span class="metric-value" id="err-network">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Active Alerts -->
+                <div class="card">
+                    <div class="card-header">Active Alerts</div>
+                    <div class="card-body">
+                        <div id="alerts-container">
+                            <div class="metric-row">
+                                <span class="metric-label">No active alerts</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Rate Limiting -->
+                <div class="card">
+                    <div class="card-header">Rate Limiting</div>
+                    <div class="card-body">
+                        <div class="metric-row">
+                            <span class="metric-label">Total Hits</span>
+                            <span class="metric-value" id="rate-hits">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Total Wait Time</span>
+                            <span class="metric-value" id="rate-wait-time">-</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Average Wait Time</span>
+                            <span class="metric-value" id="rate-avg-wait">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="timestamp" id="last-updated">-</div>
+        </div>
+    </div>
+
+    <script>
+        let refreshInterval;
+
+        async function fetchDashboardData() {
+            try {
+                const response = await fetch('/monitoring/dashboard');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                const result = await response.json();
+                return result.data;
+            } catch (error) {
+                console.error('Failed to fetch dashboard data:', error);
+                throw error;
+            }
+        }
+
+        function updateDashboard(data) {
+            // Update status overview
+            document.getElementById('status-value').textContent = data.overview.status.toUpperCase();
+            document.getElementById('overall-status').className = `status-card ${data.overview.status}`;
+            
+            document.getElementById('success-rate').textContent = `${data.overview.successRate.toFixed(1)}%`;
+            document.getElementById('avg-response-time').textContent = `${Math.round(data.performance.averageResponseTime)}ms`;
+            document.getElementById('total-requests').textContent = data.overview.totalRequests.toLocaleString();
+
+            // Update performance metrics
+            document.getElementById('perf-avg-time').textContent = `${Math.round(data.performance.averageResponseTime)}ms`;
+            document.getElementById('perf-p95-time').textContent = `${Math.round(data.performance.p95ResponseTime)}ms`;
+            document.getElementById('perf-min-time').textContent = `${Math.round(data.performance.minResponseTime)}ms`;
+            document.getElementById('perf-max-time').textContent = `${Math.round(data.performance.maxResponseTime)}ms`;
+            document.getElementById('perf-rpm').textContent = data.performance.requestsPerMinute.toFixed(1);
+
+            // Update request statistics
+            document.getElementById('req-total').textContent = data.requests.total.toLocaleString();
+            document.getElementById('req-successful').textContent = data.requests.successful.toLocaleString();
+            document.getElementById('req-failed').textContent = data.requests.failed.toLocaleString();
+            document.getElementById('req-success-rate').textContent = `${data.overview.successRate.toFixed(1)}%`;
+            document.getElementById('req-error-rate').textContent = `${data.overview.errorRate.toFixed(1)}%`;
+
+            // Update message statistics
+            document.getElementById('msg-sent').textContent = data.messages.sent.toLocaleString();
+            document.getElementById('msg-delivered').textContent = data.messages.delivered.toLocaleString();
+            document.getElementById('msg-failed').textContent = data.messages.failed.toLocaleString();
+            document.getElementById('msg-delivery-rate').textContent = `${data.messages.deliveryRate.toFixed(1)}%`;
+            document.getElementById('msg-text').textContent = data.messages.byType.text.toLocaleString();
+
+            // Update error statistics
+            document.getElementById('err-total').textContent = data.errors.total.toLocaleString();
+            document.getElementById('err-rate-limits').textContent = data.errors.rateLimits.toLocaleString();
+            document.getElementById('err-auth-failures').textContent = data.errors.authFailures.toLocaleString();
+            document.getElementById('err-network').textContent = data.errors.networkErrors.toLocaleString();
+
+            // Update rate limiting
+            document.getElementById('rate-hits').textContent = data.rateLimiting.hits.toLocaleString();
+            document.getElementById('rate-wait-time').textContent = `${Math.round(data.rateLimiting.totalWaitTime)}s`;
+            document.getElementById('rate-avg-wait').textContent = `${data.rateLimiting.averageWaitTime.toFixed(1)}s`;
+
+            // Update alerts
+            const alertsContainer = document.getElementById('alerts-container');
+            if (data.alerts.active.length === 0) {
+                alertsContainer.innerHTML = '<div class="metric-row"><span class="metric-label">No active alerts</span></div>';
+            } else {
+                alertsContainer.innerHTML = data.alerts.active.map(alert => `
+                    <div class="alert ${alert.severity}">
+                        <strong>${alert.type}:</strong> ${alert.message}
+                        <div class="alert-time">${new Date(alert.timestamp).toLocaleString()}</div>
+                    </div>
+                `).join('');
+            }
+
+            // Update timestamp
+            document.getElementById('last-updated').textContent = `Last updated: ${new Date(data.timestamp).toLocaleString()}`;
+        }
+
+        function showError(message) {
+            const errorContainer = document.getElementById('error-container');
+            errorContainer.innerHTML = `<div class="error">Error: ${message}</div>`;
+        }
+
+        function hideError() {
+            document.getElementById('error-container').innerHTML = '';
+        }
+
+        async function refreshDashboard() {
+            try {
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('dashboard-content').style.display = 'none';
+                hideError();
+
+                const data = await fetchDashboardData();
+                updateDashboard(data);
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('dashboard-content').style.display = 'block';
+            } catch (error) {
+                document.getElementById('loading').style.display = 'none';
+                showError(error.message);
+            }
+        }
+
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            refreshDashboard();
+            
+            // Auto-refresh every 30 seconds
+            refreshInterval = setInterval(refreshDashboard, 30000);
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+        });
+    </script>
+</body>
+</html>

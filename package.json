@@ -13,7 +13,22 @@
     "config:status": "node scripts/config-cli.js status",
     "config:validate": "node scripts/config-cli.js validate",
     "config:features": "node scripts/config-cli.js feature list",
-    "config:health": "node scripts/config-cli.js feature health"
+    "config:health": "node scripts/config-cli.js feature health",
+    "config:cloud-api": "node scripts/validate-cloud-api-config.js",
+    "config:env": "node scripts/validate-environment.js",
+    "setup": "node scripts/validate-environment.js help",
+    "migration": "node scripts/migration-helper.js",
+    "migration:check": "node scripts/migration-helper.js check",
+    "migration:config": "node scripts/migration-helper.js config",
+    "migration:enable": "node scripts/migration-helper.js enable",
+    "migration:status": "node scripts/migration-helper.js status",
+    "health": "node scripts/service-health-check.js",
+    "health:save": "node scripts/service-health-check.js --save",
+    "rollback": "node scripts/rollback-procedures.js",
+    "rollback:emergency": "node scripts/rollback-procedures.js emergency",
+    "rollback:gradual": "node scripts/rollback-procedures.js gradual",
+    "rollback:complete": "node scripts/rollback-procedures.js complete",
+    "rollback:validate": "node scripts/rollback-procedures.js validate"
   },
   "keywords": [],
   "author": "",
@@ -32,8 +47,7 @@
     "nanoid": "^5.1.3",
     "node-cron": "^4.1.0",
     "openai": "^4.87.3",
-    "rate-limit-mongo": "^2.3.2",
-    "twilio": "^5.4.4"
+    "rate-limit-mongo": "^2.3.2"
   },
   "devDependencies": {
     "@jest/globals": "^30.0.5",

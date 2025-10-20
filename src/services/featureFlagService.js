@@ -160,7 +160,9 @@ class FeatureFlagService {
       alertingEnabled: 'Enables system alerting and monitoring',
       metricsCollectionEnabled: 'Enables collection of system metrics',
       enhancedLoggingEnabled: 'Enables detailed logging for debugging',
-      debugModeEnabled: 'Enables debug mode with additional logging and validation'
+      debugModeEnabled: 'Enables debug mode with additional logging and validation',
+      whatsappCloudApiEnabled: 'Enables WhatsApp Cloud API as the primary messaging service',
+      whatsappCloudApiMigrationMode: 'Enables gradual migration mode with percentage-based traffic routing'
     };
     
     return descriptions[featureName] || 'No description available';
@@ -177,7 +179,9 @@ class FeatureFlagService {
       alertingEnabled: [],
       metricsCollectionEnabled: [],
       enhancedLoggingEnabled: [],
-      debugModeEnabled: []
+      debugModeEnabled: [],
+      whatsappCloudApiEnabled: [],
+      whatsappCloudApiMigrationMode: []
     };
     
     return dependencies[featureName] || [];
@@ -194,7 +198,9 @@ class FeatureFlagService {
       alertingEnabled: 'low', // Monitoring only
       metricsCollectionEnabled: 'low', // Monitoring only
       enhancedLoggingEnabled: 'low', // Debugging only
-      debugModeEnabled: 'low' // Development only
+      debugModeEnabled: 'low', // Development only
+      whatsappCloudApiEnabled: 'critical', // Changes messaging provider
+      whatsappCloudApiMigrationMode: 'high' // Affects traffic routing
     };
     
     return impacts[featureName] || 'unknown';
@@ -314,6 +320,254 @@ class FeatureFlagService {
       failed,
       results
     };
+  }
+
+  /**
+   * Get migration traffic percentage for Cloud API
+   */
+  getMigrationTrafficPercentage() {
+    return this.configManager.get('migration.cloudApiTrafficPercentage', 0);
+  }
+
+  /**
+   * Update migration traffic percentage
+   */
+  updateMigrationTrafficPercentage(percentage, reason = 'Migration traffic update') {
+    if (percentage < 0 || percentage > 100) {
+      return {
+        success: false,
+        error: 'Percentage must be between 0 and 100'
+      };
+    }
+
+    try {
+      const oldValue = this.getMigrationTrafficPercentage();
+      this.configManager.updateMigrationConfig('cloudApiTrafficPercentage', percentage);
+      
+      // Notify listeners
+      this.notifyListeners('migrationTrafficPercentage', oldValue, percentage, reason);
+      
+      structuredLogger.info('Migration traffic percentage updated', {
+        oldValue,
+        newValue: percentage,
+        reason,
+        timestamp: new Date().toISOString()
+      });
+      
+      return {
+        success: true,
+        oldValue,
+        newValue: percentage,
+        reason
+      };
+    } catch (error) {
+      structuredLogger.error('Failed to update migration traffic percentage', {
+        percentage,
+        reason,
+        error: error.message
+      });
+      
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Get migration status and configuration
+   */
+  getMigrationStatus() {
+    const migrationMode = this.isEnabled('whatsappCloudApiMigrationMode');
+    const cloudApiEnabled = this.isEnabled('whatsappCloudApiEnabled');
+    const trafficPercentage = this.getMigrationTrafficPercentage();
+    
+    let status = 'not_started';
+    if (cloudApiEnabled && !migrationMode) {
+      status = 'completed';
+    } else if (migrationMode) {
+      if (trafficPercentage === 0) {
+        status = 'ready';
+      } else if (trafficPercentage < 100) {
+        status = 'in_progress';
+      } else {
+        status = 'ready_for_completion';
+      }
+    }
+    
+    return {
+      status,
+      migrationMode,
+      cloudApiEnabled,
+      trafficPercentage,
+      canStart: !migrationMode && !cloudApiEnabled,
+      canIncrease: migrationMode && trafficPercentage < 100,
+      canDecrease: migrationMode && trafficPercentage > 0,
+      canComplete: migrationMode && trafficPercentage === 100,
+      canRollback: migrationMode || cloudApiEnabled
+    };
+  }
+
+  /**
+   * Start migration process
+   */
+  startMigration(initialPercentage = 5, reason = 'Migration started') {
+    const status = this.getMigrationStatus();
+    
+    if (!status.canStart) {
+      return {
+        success: false,
+        error: 'Migration cannot be started in current state'
+      };
+    }
+    
+    try {
+      // Enable migration mode
+      const migrationResult = this.updateFlag('whatsappCloudApiMigrationMode', true, reason);
+      if (!migrationResult.success) {
+        return migrationResult;
+      }
+      
+      // Set initial traffic percentage
+      const trafficResult = this.updateMigrationTrafficPercentage(initialPercentage, reason);
+      if (!trafficResult.success) {
+        // Rollback migration mode
+        this.updateFlag('whatsappCloudApiMigrationMode', false, 'Rollback due to traffic update failure');
+        return trafficResult;
+      }
+      
+      structuredLogger.info('Migration started', {
+        initialPercentage,
+        reason,
+        timestamp: new Date().toISOString()
+      });
+      
+      return {
+        success: true,
+        message: `Migration started with ${initialPercentage}% traffic to Cloud API`,
+        initialPercentage,
+        reason
+      };
+    } catch (error) {
+      structuredLogger.error('Failed to start migration', {
+        initialPercentage,
+        reason,
+        error: error.message
+      });
+      
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Complete migration process
+   */
+  completeMigration(reason = 'Migration completed') {
+    const status = this.getMigrationStatus();
+    
+    if (!status.canComplete) {
+      return {
+        success: false,
+        error: 'Migration cannot be completed in current state. Traffic must be at 100%.'
+      };
+    }
+    
+    try {
+      // Enable Cloud API fully
+      const cloudApiResult = this.updateFlag('whatsappCloudApiEnabled', true, reason);
+      if (!cloudApiResult.success) {
+        return cloudApiResult;
+      }
+      
+      // Disable migration mode
+      const migrationResult = this.updateFlag('whatsappCloudApiMigrationMode', false, reason);
+      if (!migrationResult.success) {
+        // Rollback Cloud API flag
+        this.updateFlag('whatsappCloudApiEnabled', false, 'Rollback due to migration mode update failure');
+        return migrationResult;
+      }
+      
+      structuredLogger.info('Migration completed', {
+        reason,
+        timestamp: new Date().toISOString()
+      });
+      
+      return {
+        success: true,
+        message: 'Migration completed successfully. All traffic now uses Cloud API.',
+        reason
+      };
+    } catch (error) {
+      structuredLogger.error('Failed to complete migration', {
+        reason,
+        error: error.message
+      });
+      
+      return {
+        success: false,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Rollback migration process
+   */
+  rollbackMigration(reason = 'Migration rollback') {
+    const status = this.getMigrationStatus();
+    
+    if (!status.canRollback) {
+      return {
+        success: false,
+        error: 'Migration cannot be rolled back in current state'
+      };
+    }
+    
+    try {
+      // Disable Cloud API
+      const cloudApiResult = this.updateFlag('whatsappCloudApiEnabled', false, reason);
+      if (!cloudApiResult.success) {
+        return cloudApiResult;
+      }
+      
+      // Disable migration mode
+      const migrationResult = this.updateFlag('whatsappCloudApiMigrationMode', false, reason);
+      if (!migrationResult.success) {
+        return migrationResult;
+      }
+      
+      // Reset traffic percentage
+      const trafficResult = this.updateMigrationTrafficPercentage(0, reason);
+      if (!trafficResult.success) {
+        structuredLogger.warn('Failed to reset traffic percentage during rollback', {
+          error: trafficResult.error
+        });
+      }
+      
+      structuredLogger.info('Migration rolled back', {
+        reason,
+        timestamp: new Date().toISOString()
+      });
+      
+      return {
+        success: true,
+        message: 'Migration rolled back successfully. All traffic now uses Twilio.',
+        reason
+      };
+    } catch (error) {
+      structuredLogger.error('Failed to rollback migration', {
+        reason,
+        error: error.message
+      });
+      
+      return {
+        success: false,
+        error: error.message
+      };
+    }
   }
 }
 
