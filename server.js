@@ -14,6 +14,7 @@ import { startAlertingJob } from './src/jobs/alertingJob.js';
 import { startLowStockAlertJob } from './src/jobs/lowStockAlertJob.js';
 import { startInactiveUserJob } from './src/jobs/inactiveUserJob.js';
 import { startMonthlyResetJob } from './src/jobs/monthlyResetJob.js';
+import { startSubscriptionReminderJob } from './src/jobs/subscriptionReminderJob.js';
 
 const app = express();
 
@@ -67,6 +68,7 @@ connectToDatabase()
     startLowStockAlertJob();
     startInactiveUserJob();
     startMonthlyResetJob();
+    startSubscriptionReminderJob();
   })
   .catch((err) => console.error("❌ Erro na conexão:", err));
 
