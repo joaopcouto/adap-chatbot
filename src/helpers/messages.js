@@ -9,9 +9,9 @@ export function sendGreetingMessage(twiml) {
   twiml.message(`👋 Olá! Sou a ADAP, sua Assistente Financeira Pessoal. Confira nossa lista de comandos:
 
 *1. LANÇAMENTOS MANUAIS* 📝
- • "25 mercado"
- • "recebi 2000 salário"
- • "3500 celular em 10x"
+ • *25 mercado*
+ • *recebi 2000 salário*
+ • *3500 celular em 10x*
 
 *2. REGISTRO POR FOTO* 📸
  • _Nota Fiscal de Loja_
@@ -19,33 +19,33 @@ export function sendGreetingMessage(twiml) {
  • _Comprovante de PIX_
 
 *3. RELATÓRIOS E CONSULTAS* 📊
- • "saldo": Mostra o saldo do mês atual
- • "gasto total" ou "receita total":
-  - Para o mês atual: "gasto total"
-  - Para um intervalo: "receita de 01/10 a 15/10"*
-  - Para um único dia: "gastos do dia 20/09", "gastos de ontem"
-  - Depois, envie "detalhes" para ver a lista de itens.
- • _Gráfico de Barras:_ "quais meus gastos nos últimos 7 dias"
- • _Gráfico de Pizza (Gastos):_ "onde gastei nos últimos 15 dias"
- • _Gráfico de Pizza (Receitas):_ "gráfico dos meus ganhos"
+ • *ver categorias*: ver, excluir e definir limites mensais para categorias
+ • *saldo*: Mostra o saldo do mês atual
+ • *gasto total* ou *receita total*:
+  - Para o mês atual: *gasto total*
+  - Para um intervalo: *receita de 01/10 até hoje*
+  - Para um único dia: *gastos do dia 20/09*, *gastos de ontem*
+ • _Gráfico de Barras:_ *quais meus gastos nos últimos 7 dias*
+ • _Gráfico de Pizza (Gastos):_ *onde gastei nos últimos 15 dias*
+ • _Gráfico de Pizza (Receitas):_ *gráfico dos meus ganhos*
 
  *4. ORGANIZAÇÃO* ⏰
- • "me lembre de pagar o aluguel dia 5"
- • "quais são meus lembretes"
- • "parcelamentos ativos"
+ • *me lembre de pagar o aluguel dia 5*
+ • *quais são meus lembretes*
+ • *parcelamentos ativos*
 
 *5. CONTROLE DE ESTOQUE (💎 PLANO DIAMANTE)* 📦
- • _Criar um Estoque:_ "criar estoque de camisetas"
- • _Adicionar Produto:_ "adicionar camiseta"
- • _Ver Produtos:_ "ver estoque de camisetas"
- • _Movimentar Estoque:_ "vendi 2 #P0001" ou "entrada 10 #P0002"
- • _Definir Alerta:_ "alerta #P0001 para 5 unidades"
+ • _Criar um Estoque:_ *criar estoque de camisetas*
+ • _Adicionar Produto:_ *adicionar camiseta*
+ • _Ver Produtos:_ *ver estoque de camisetas*
+ • _Movimentar Estoque:_ *vendi 2 #P0001* ou *entrada 10 #P0002*
+ • _Definir Alerta:_ *alerta #P0001 para 5 unidades*
 
 *6. EXCLUIR REGISTROS* 🗑️
 Use sempre o ID (#...) fornecido na mensagem de confirmação.
- • "remover gasto #a4b8c"
- • "excluir parcelamento #J-9tpH"
- • "apagar lembrete #d9bdd3"
+ • *remover gasto #a4b8c*
+ • *excluir parcelamento #J-9tpH*
+ • *apagar lembrete #d9bdd3*
 
 Estou aqui para simplificar seu controle financeiro. Vamos começar?`);
 }

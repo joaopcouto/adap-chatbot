@@ -27,6 +27,7 @@ import {
   getUserCategories,
   getFormattedCategories,
   deleteCategoryAndTransactions,
+  checkCategoryLimit,
 } from "../helpers/totalUtils.js";
 import {
   generateChart,
@@ -158,24 +159,36 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
       if (previousData.awaiting === "delete_category_confirmation") {
         const { categoryName } = previousData.payload;
 
-        if (userMessage.trim().toLowerCase() === 'detalhes') {
-            const result = await getExpenseDetails(userIdString, null, null, categoryName, null, null, null, false);
-            
-            const detailsMessage = result.messages.join('\n\n');
+        if (userMessage.trim().toLowerCase() === "detalhes") {
+          const result = await getExpenseDetails(
+            userIdString,
+            null,
+            null,
+            categoryName,
+            null,
+            null,
+            null,
+            false
+          );
 
-            const finalMessage = `${detailsMessage}\n\nApós revisar, você ainda deseja excluir a categoria *${categoryName}* e todos os lançamentos acima? Responda *sim* para confirmar.`;
-            
-            await sendTextMessage(req.body.From, finalMessage);
-            responseHasBeenSent = true;
-        
-        } else if (userMessage.trim().toLowerCase() === 'sim') {
-            const result = await deleteCategoryAndTransactions(userIdString, categoryName);
-            twiml.message(result.message);
-            delete conversationState[userIdString];
-        
+          const detailsMessage = result.messages.join("\n\n");
+
+          const finalMessage = `${detailsMessage}\n\nApós revisar, você ainda deseja excluir a categoria *${categoryName}* e todos os lançamentos acima? Responda *sim* para confirmar.`;
+
+          await sendTextMessage(req.body.From, finalMessage);
+          responseHasBeenSent = true;
+        } else if (userMessage.trim().toLowerCase() === "sim") {
+          const result = await deleteCategoryAndTransactions(
+            userIdString,
+            categoryName
+          );
+          twiml.message(result.message);
+          delete conversationState[userIdString];
         } else {
-            twiml.message(`Ok, a exclusão da categoria *${categoryName}* foi cancelada.`);
-            delete conversationState[userIdString];
+          twiml.message(
+            `Ok, a exclusão da categoria *${categoryName}* foi cancelada.`
+          );
+          delete conversationState[userIdString];
         }
       } else if (previousData.awaiting === "document_category_confirmation") {
         const categoryName = userMessage.trim();
@@ -792,6 +805,17 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                   { upsert: true }
                 );
 
+                const alertMessage = await checkCategoryLimit(
+                  userIdString,
+                  categoryDoc._id.toString(),
+                  amount
+                );
+                if (alertMessage) {
+                  setTimeout(
+                    () => sendTextMessage(req.body.From, alertMessage),
+                    1000
+                  );
+                }
                 break;
               }
               case "add_transaction_new_category": {
@@ -897,8 +921,18 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                     { $inc: { totalSpent: newAmount } },
                     { upsert: true }
                   );
+                  const alertMessage = await checkCategoryLimit(
+                    userIdString,
+                    categoryDoc._id.toString(),
+                    newAmount
+                  );
+                  if (alertMessage) {
+                    setTimeout(
+                      () => sendTextMessage(req.body.From, alertMessage),
+                      1000
+                    );
+                  }
                 }
-
                 break;
               }
               case "get_active_installments": {
@@ -1471,39 +1505,98 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                 break;
               }
               case "delete_category": {
-              if (!(await hasAccessToFeature(userObjectId, "categories"))) {
-                twiml.message("🚫 A exclusão de categorias personalizadas está disponível apenas como um complemento.");
+                if (!(await hasAccessToFeature(userObjectId, "categories"))) {
+                  twiml.message(
+                    "🚫 A exclusão de categorias personalizadas está disponível apenas como um complemento."
+                  );
+                  break;
+                }
+                const { category } = interpretation.data;
+                if (!category) {
+                  twiml.message(
+                    "Por favor, especifique o nome da categoria que deseja excluir. Ex: *excluir categoria lazer*"
+                  );
+                  break;
+                }
+
+                const standardizedName = category.trim().toLowerCase();
+                const categoryDoc = await Category.findOne({
+                  userId: userIdString,
+                  name: standardizedName,
+                });
+
+                if (!categoryDoc) {
+                  twiml.message(`🚫 Categoria "*${category}*" não encontrada.`);
+                  break;
+                }
+
+                const transactions = await Transaction.find({
+                  userId: userIdString,
+                  categoryId: categoryDoc._id.toString(),
+                });
+                const totalAmount = transactions.reduce(
+                  (sum, t) => sum + t.amount,
+                  0
+                );
+
+                conversationState[userIdString] = {
+                  awaiting: "delete_category_confirmation",
+                  payload: { categoryName: category },
+                };
+
+                let confirmationMsg = `Você está prestes a excluir a categoria "*${category}*".\n\n`;
+                confirmationMsg += `Isso irá apagar permanentemente *${
+                  transactions.length
+                }* lançamento(s), totalizando *R$ ${totalAmount.toFixed(
+                  2
+                )}*.\n\n`;
+                confirmationMsg += `Digite *detalhes* para revisar os lançamentos ou responda *sim* para confirmar a exclusão.\n\n_(Esta ação não pode ser desfeita)_`;
+
+                twiml.message(confirmationMsg);
                 break;
               }
-              const { category } = interpretation.data;
-              if (!category) {
-                twiml.message("Por favor, especifique o nome da categoria que deseja excluir. Ex: *excluir categoria lazer*");
+              case "set_category_limit": {
+                if (!(await hasAccessToFeature(userObjectId, "categories"))) {
+                  twiml.message(
+                    "🚫 A definição de limites está disponível apenas como um complemento."
+                  );
+                  break;
+                }
+
+                const { category, amount } = interpretation.data;
+
+                if (!category || amount === undefined || amount <= 0) {
+                  twiml.message(
+                    "Formato incorreto. Use: *limite [categoria] para [valor]*. Ex: `limite alimentação para 500`"
+                  );
+                  break;
+                }
+
+                const standardizedName = category.trim().toLowerCase();
+                const categoryDoc = await Category.findOne({
+                  userId: userIdString,
+                  name: standardizedName,
+                });
+
+                if (!categoryDoc) {
+                  twiml.message(
+                    `🚫 Categoria "*${category}*" não encontrada. Crie-a primeiro registrando um gasto nela.`
+                  );
+                  break;
+                }
+
+                await Category.updateOne(
+                  { _id: categoryDoc._id },
+                  { $set: { monthlyLimit: amount } }
+                );
+
+                twiml.message(
+                  `✅ Limite para a categoria "*${category}*" definido para *R$ ${amount.toFixed(
+                    2
+                  )}* por mês.`
+                );
                 break;
               }
-
-              const standardizedName = category.trim().toLowerCase();
-              const categoryDoc = await Category.findOne({ userId: userIdString, name: standardizedName });
-
-              if (!categoryDoc) {
-                twiml.message(`🚫 Categoria "*${category}*" não encontrada.`);
-                break;
-              }
-
-              const transactions = await Transaction.find({ userId: userIdString, categoryId: categoryDoc._id.toString() });
-              const totalAmount = transactions.reduce((sum, t) => sum + t.amount, 0);
-
-              conversationState[userIdString] = {
-                awaiting: "delete_category_confirmation",
-                payload: { categoryName: category }
-              };
-
-              let confirmationMsg = `Você está prestes a excluir a categoria "*${category}*".\n\n`;
-              confirmationMsg += `Isso irá apagar permanentemente *${transactions.length}* lançamento(s), totalizando *R$ ${totalAmount.toFixed(2)}*.\n\n`;
-              confirmationMsg += `Digite *detalhes* para revisar os lançamentos ou responda *sim* para confirmar a exclusão.\n\n_(Esta ação não pode ser desfeita)_`;
-              
-              twiml.message(confirmationMsg);
-              break;
-            }
               case "google_connect": {
                 try {
                   const correlationId = generateCorrelationId();

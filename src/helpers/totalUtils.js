@@ -784,9 +784,17 @@ export async function getFormattedCategories(userId) {
     return "Você ainda não criou nenhuma categoria personalizada. Basta registrar um gasto com uma nova categoria para criá-la! Ex: `25 café em padaria`";
   }
 
-  let message = "📁 *Suas Categorias:*\n\n";
-  message += categories.map(c => `• ${c.name.charAt(0).toUpperCase() + c.name.slice(1)}`).join("\n");
-  message += `\n\nPara excluir uma categoria (e todos os lançamentos nela), envie: *excluir categoria [nome]*`;
+  let message = "📁 *Suas Categorias e Limites Mensais:*\n\n";
+  message += categories.map(c => {
+    let line = `• ${c.name.charAt(0).toUpperCase() + c.name.slice(1)}`;
+    if (c.monthlyLimit && c.monthlyLimit > 0) {
+      line += ` (Limite: R$ ${c.monthlyLimit.toFixed(2)})`;
+    }
+    return line;
+  }).join("\n");
+  
+  message += `\n\nPara definir um limite, envie: *limite [categoria] para [valor]*`;
+  message += `\nPara excluir, envie: *excluir categoria [nome]*`;
 
   return message;
 }
@@ -835,4 +843,26 @@ export async function deleteCategoryAndTransactions(userId, categoryName) {
     success: true, 
     message: `🗑️ Categoria "*${category.name}*" e *${deleteResult.deletedCount}* transações associadas foram excluídas com sucesso.` 
   };
+}
+
+export async function checkCategoryLimit(userId, categoryId, newExpenseAmount) {
+  const category = await Category.findById(categoryId).lean();
+
+  if (!category || !category.monthlyLimit || category.monthlyLimit <= 0) {
+    return null;
+  }
+
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+  const newTotal = await calculateTotalExpenses(userId, category.name, currentMonth);
+  
+  const oldTotal = newTotal - newExpenseAmount;
+
+  if (newTotal >= category.monthlyLimit && oldTotal < category.monthlyLimit) {
+    const overage = newTotal - category.monthlyLimit;
+    return `⚠️ *Limite de Categoria Atingido!*\n\nVocê ultrapassou seu limite de *R$ ${category.monthlyLimit.toFixed(2)}* para a categoria "*${category.name}*".\n\nCom este novo gasto, você está *R$ ${overage.toFixed(2)}* acima do estimado para o mês.`;
+  }
+
+  return null;
 }

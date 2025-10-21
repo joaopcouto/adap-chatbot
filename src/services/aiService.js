@@ -104,6 +104,7 @@ export async function interpretMessageWithAI(message, currentDate) {
       "set_early_reminder" -> O usuário quer definir um lembrete antecipado. Extraia o valor numérico e a unidade (minutos/horas).
       "list_categories" -> O usuário quer ver a lista de todas as suas categorias criadas.
       "delete_category" -> O usuário quer excluir uma categoria e todos os seus lançamentos. Extraia o nome da categoria.
+      "set_category_limit" -> O usuário quer definir um limite de gasto mensal para uma categoria. Extraia o nome da categoria e o valor do limite.
       "unknown" → A mensagem não corresponde a nenhuma das intenções acima.
   
   2. Regras de Extração de Dados:
@@ -136,7 +137,7 @@ export async function interpretMessageWithAI(message, currentDate) {
        Responda apenas com um objeto JSON válido sem qualquer formatação ou explicação adicional
      - Retorne um objeto JSON com a intenção e dados extraídos. Use este formato:
        {
-        "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "delete_list_item" | "generate_daily_chart" | "generate_category_chart" | "generate_income_category_chart" | "get_total_income" |"get_total" | "get_balance" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "google_connect" | "google_disconnect" | "google_status" | "google_enable_sync" | "google_disable_sync" | "google_debug" | "financial_help" | "create_inventory_template" | "add_product_to_inventory" | "list_inventory_templates" | "update_inventory_quantity" | "view_inventory" | "set_inventory_alert" | "set_early_reminder" | "list_categories" | "delete_category",
+        "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "delete_list_item" | "generate_daily_chart" | "generate_category_chart" | "generate_income_category_chart" | "get_total_income" |"get_total" | "get_balance" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "google_connect" | "google_disconnect" | "google_status" | "google_enable_sync" | "google_disable_sync" | "google_debug" | "financial_help" | "create_inventory_template" | "add_product_to_inventory" | "list_inventory_templates" | "update_inventory_quantity" | "view_inventory" | "set_inventory_alert" | "set_early_reminder" | "list_categories" | "delete_category" | "set_category_limit" ,
          "data": {
            "amount": number,
            "description": string,
@@ -270,6 +271,13 @@ export async function interpretMessageWithAI(message, currentDate) {
       Resposta: { "intent": "delete_category", "data": { "category": "alimentação" } }
     - Usuário: "apagar categoria lazer"
       Resposta: { "intent": "delete_category", "data": { "category": "lazer" } }
+
+    - Usuário: "definir limite alimentação para 500"
+      Resposta: { "intent": "set_category_limit", "data": { "category": "alimentação", "amount": 500 } }
+    - Usuário: "limite de gastos para lazer R$ 200"
+      Resposta: { "intent": "set_category_limit", "data": { "category": "lazer", "amount": 200 } }
+    - Usuário: "limite mercado 300"
+      Resposta: { "intent": "set_category_limit", "data": { "category": "mercado", "amount": 300 } }
 
     - Usuário: "Conectar Google Calendar"
       Resposta: { "intent": "google_connect", "data": {} }
