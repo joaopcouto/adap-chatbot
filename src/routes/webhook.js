@@ -4,7 +4,11 @@ import { sendTextMessage } from "../services/twilioService.js";
 import { devLog } from "../helpers/logger.js";
 import { generateCorrelationId } from "../helpers/logger.js";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
-import { TIMEZONE, getDateRangeFromPeriod, formatInBrazil } from "../utils/dateUtils.js";
+import {
+  TIMEZONE,
+  getDateRangeFromPeriod,
+  formatInBrazil,
+} from "../utils/dateUtils.js";
 
 import {
   interpretMessageWithAI,
@@ -487,6 +491,59 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               `✅ Conta da *${provider}* registrada como *paga* com sucesso!`
             );
           }
+          delete conversationState[userIdString];
+        }
+      } else if (previousData.awaiting === "early_reminder_prompt") {
+        try {
+          const interpretation = await interpretMessageWithAI(
+            userMessage,
+            new Date().toISOString()
+          );
+
+          if (interpretation.intent === "set_early_reminder") {
+            const { value, unit } = interpretation.data;
+            const { reminderId } = previousData.payload;
+
+            const reminder = await Reminder.findById(reminderId);
+            if (!reminder) {
+              twiml.message(
+                "Ops, não encontrei o lembrete original. Tente criar um novo."
+              );
+              delete conversationState[userIdString];
+            } else {
+              let earlyDate = new Date(reminder.date);
+              if (unit.includes("minuto")) {
+                earlyDate.setMinutes(earlyDate.getMinutes() - value);
+              } else if (unit.includes("hora")) {
+                earlyDate.setHours(earlyDate.getHours() - value);
+              }
+
+              if (earlyDate < new Date()) {
+                twiml.message(
+                  "Essa antecedência faria o lembrete ser no passado. Por favor, escolha um tempo menor."
+                );
+              } else {
+                await Reminder.updateOne(
+                  { _id: reminder._id },
+                  { $set: { earlyReminderDate: earlyDate } }
+                );
+                twiml.message(
+                  `✅ Confirmado! Irei te lembrar ${value} ${unit} antes.`
+                );
+                delete conversationState[userIdString];
+              }
+            }
+          } else {
+            twiml.message(
+              "Ok, sem problemas! O lembrete principal está mantido. 😉"
+            );
+            delete conversationState[userIdString];
+          }
+        } catch (err) {
+          devLog("Erro ao processar lembrete antecipado:", err);
+          twiml.message(
+            "Ok, sem problemas! O lembrete principal está mantido. 😉"
+          );
           delete conversationState[userIdString];
         }
       } else {
@@ -1032,14 +1089,17 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
               }
               case "get_total":
               case "get_total_income": {
-                let { category, month, monthName, startDate, endDate } = interpretation.data;
+                let { category, month, monthName, startDate, endDate } =
+                  interpretation.data;
                 let periodName;
 
                 if (!startDate && !month) {
-                  twiml.message("🤔 Não entendi o período. Você pode pedir o total para o mês atual (ex: 'gasto total') ou para um período específico (ex: 'gastos de 25/09 a 07/10').");
+                  twiml.message(
+                    "🤔 Não entendi o período. Você pode pedir o total para o mês atual (ex: 'gasto total') ou para um período específico (ex: 'gastos de 25/09 a 07/10')."
+                  );
                   break;
                 }
-                
+
                 if (startDate && endDate) {
                   const start = new Date(startDate);
                   const end = new Date(endDate);
@@ -1047,59 +1107,93 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                   if (start.toDateString() === end.toDateString()) {
                     periodName = `no dia ${formatInBrazil(start)}`;
                   } else {
-                    periodName = `de ${formatInBrazil(start)} a ${formatInBrazil(end)}`;
+                    periodName = `de ${formatInBrazil(
+                      start
+                    )} a ${formatInBrazil(end)}`;
                   }
                 } else {
                   periodName = `no mês de ${monthName}`;
                 }
 
-                const isIncome = interpretation.intent === 'get_total_income';
+                const isIncome = interpretation.intent === "get_total_income";
 
                 const total = isIncome
-                  ? await calculateTotalIncome(userIdString, month, category, startDate, endDate)
-                  : await calculateTotalExpenses(userIdString, category, month, startDate, endDate); 
-                  
-                if (total === 0) {
-                    let zeroMessage = `🤷‍♀️ Nenhuma movimentação registrada ${periodName}.`;
-                    if (category) {
-                      const catFormatted = category.charAt(0).toUpperCase() + category.slice(1);
-                      zeroMessage = `🤷‍♀️ Nenhum(a) ${isIncome ? "receita" : "gasto"} na categoria _*${catFormatted}*_ ${periodName}.`;
-                    }
-                    twiml.message(zeroMessage);
-                } else {
-                    const typeText = isIncome ? "Receita total" : "Gasto total";
-                    const icon = isIncome ? "📈" : "📉";
-
-                    let responseMessage = `${icon} *${typeText}* ${periodName}: \nR$ ${total.toFixed(2)}`;
-                    if (category) {
-                      const catFormatted = category.charAt(0).toUpperCase() + category.slice(1);
-                      responseMessage = `${icon} *${typeText}* em _*${catFormatted}*_ ${periodName}: \nR$ ${total.toFixed(2)}`;
-                    }
-
-                    responseMessage += `\n\nDigite "detalhes" para ver a lista de itens.`;
-                    
-                    conversationState[userIdString] = {
-                      type: isIncome ? "income" : "expense",
+                  ? await calculateTotalIncome(
+                      userIdString,
+                      month,
                       category,
-                      month,       
-                      monthName,   
-                      startDate,   
-                      endDate,
-                      periodName, 
-                    };
-                    twiml.message(responseMessage);
+                      startDate,
+                      endDate
+                    )
+                  : await calculateTotalExpenses(
+                      userIdString,
+                      category,
+                      month,
+                      startDate,
+                      endDate
+                    );
+
+                if (total === 0) {
+                  let zeroMessage = `🤷‍♀️ Nenhuma movimentação registrada ${periodName}.`;
+                  if (category) {
+                    const catFormatted =
+                      category.charAt(0).toUpperCase() + category.slice(1);
+                    zeroMessage = `🤷‍♀️ Nenhum(a) ${
+                      isIncome ? "receita" : "gasto"
+                    } na categoria _*${catFormatted}*_ ${periodName}.`;
+                  }
+                  twiml.message(zeroMessage);
+                } else {
+                  const typeText = isIncome ? "Receita total" : "Gasto total";
+                  const icon = isIncome ? "📈" : "📉";
+
+                  let responseMessage = `${icon} *${typeText}* ${periodName}: \nR$ ${total.toFixed(
+                    2
+                  )}`;
+                  if (category) {
+                    const catFormatted =
+                      category.charAt(0).toUpperCase() + category.slice(1);
+                    responseMessage = `${icon} *${typeText}* em _*${catFormatted}*_ ${periodName}: \nR$ ${total.toFixed(
+                      2
+                    )}`;
+                  }
+
+                  responseMessage += `\n\nDigite "detalhes" para ver a lista de itens.`;
+
+                  conversationState[userIdString] = {
+                    type: isIncome ? "income" : "expense",
+                    category,
+                    month,
+                    monthName,
+                    startDate,
+                    endDate,
+                    periodName,
+                  };
+                  twiml.message(responseMessage);
                 }
                 break;
               }
               case "get_balance": {
                 const now = new Date();
-                const currentMonthCode = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-                const currentMonthName = now.toLocaleString("pt-BR", { month: "long" }).charAt(0).toUpperCase() + now.toLocaleString("pt-BR", { month: "long" }).slice(1);
+                const currentMonthCode = `${now.getFullYear()}-${String(
+                  now.getMonth() + 1
+                ).padStart(2, "0")}`;
+                const currentMonthName =
+                  now
+                    .toLocaleString("pt-BR", { month: "long" })
+                    .charAt(0)
+                    .toUpperCase() +
+                  now.toLocaleString("pt-BR", { month: "long" }).slice(1);
 
-                const summary = await getMonthlySummary(userIdString, currentMonthCode);
+                const summary = await getMonthlySummary(
+                  userIdString,
+                  currentMonthCode
+                );
 
                 const balancePrefix = summary.balance >= 0 ? "💰" : "⚠️";
-                const balanceMessage = `${balancePrefix} *Saldo de ${currentMonthName}:* *R$ ${summary.balance.toFixed(2)}*`;
+                const balanceMessage = `${balancePrefix} *Saldo de ${currentMonthName}:* *R$ ${summary.balance.toFixed(
+                  2
+                )}*`;
 
                 twiml.message(balanceMessage);
                 break;
@@ -1267,7 +1361,6 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                   break;
                 }
 
-                // Use the new ReminderService for creation with Google Calendar integration
                 const reminderData = {
                   description: description,
                   date: dateToSave,
@@ -1286,11 +1379,22 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
                     userPhoneNumberClean,
                     correlationId
                   );
-                  await sendReminderMessage(
-                    twiml,
+
+                  conversationState[userIdString] = {
+                    awaiting: "early_reminder_prompt",
+                    payload: { reminderId: result.reminder._id },
+                  };
+
+                  const originalMessage = await sendReminderMessage(
+                    null, 
                     userMessage,
                     result.reminder
                   );
+
+                  const finalMessage = `${originalMessage}\n\n*Gostaria de ser lembrado minutos ou horas antes do seu compromisso?*`;
+
+                  await sendTextMessage(req.body.From, finalMessage);
+                  responseHasBeenSent = true;
                 } catch (error) {
                   devLog(
                     `[Webhook] Error creating reminder for user ${userIdString} (${correlationId}):`,
