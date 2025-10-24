@@ -13,8 +13,10 @@ async function findAndNotifyInactiveUsers() {
 
   try {
     const inactiveUsers = await UserActivity.find({ lastInteractionAt: { $lte: sevenDaysAgo } });
-    if (inactiveUsers.length === 0) return;
-
+    if (inactiveUsers.length === 0) {
+      devLog("[InactiveUserJob] Nenhum usuário inativo encontrado para notificar hoje.");
+      return;
+    }
     const templateSid = process.env.TWILIO_INACTIVE_USER_TEMPLATE_SID;
     for (const user of inactiveUsers) {
       await sendTemplateMessage(`whatsapp:${user.phoneNumber}`, templateSid, { '1': user.name.split(' ')[0] });
@@ -30,6 +32,6 @@ async function dailyTasks() {
 }
 
 export function startInactiveUserJob() {
-  cron.schedule('35 11 * * *', dailyTasks, { scheduled: true, timezone: "America/Sao_Paulo" });
+  cron.schedule('46 11 * * *', dailyTasks, { scheduled: true, timezone: "America/Sao_Paulo" });
   devLog("✅ Job de tarefas diárias (inatividade e sheets) agendado.");
 }
