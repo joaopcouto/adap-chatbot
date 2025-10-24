@@ -23,11 +23,38 @@ async function findAndNotifyInactiveUsers() {
       devLog("[InactiveUserJob] Nenhum usuário inativo encontrado para notificar hoje.");
       return;
     }
+
     const templateSid = process.env.TWILIO_INACTIVE_USER_TEMPLATE_SID;
-    for (const user of inactiveUsers) {
-      await sendTemplateMessage(`whatsapp:${user.phoneNumber}`, templateSid, { '1': user.name.split(' ')[0] });
+    if (!templateSid) {
+      devLog("[InactiveUserJob] ERRO: TWILIO_INACTIVE_USER_TEMPLATE_SID não está definido no .env");
+      return;
     }
-  } catch (error) { devLog("Erro no job de inatividade:", error); }
+
+    devLog(`[InactiveUserJob] Encontrados ${inactiveUsers.length} usuários inativos. Enviando lembretes...`);
+
+    for (const user of inactiveUsers) {
+      try {
+        const firstName = user.name.split(' ')[0];
+
+        const contentVariables = {
+          '1': firstName
+        };
+
+        await sendTemplateMessage(
+          `whatsapp:${user.phoneNumber}`, 
+          templateSid, 
+          contentVariables
+        );
+
+        devLog(`[InactiveUserJob] Lembrete de inatividade enviado para ${user.name} (${user.phoneNumber}).`);
+
+      } catch (sendError) {
+        devLog(`[InactiveUserJob] Falha ao ENVIAR lembrete para ${user.name}. Erro: ${sendError.message}`);
+      }
+    }
+  } catch (error) { 
+    devLog("[InactiveUserJob] Erro GERAL ao processar usuários inativos:", error);
+  }
 }
 
 async function dailyTasks() {
@@ -38,6 +65,9 @@ async function dailyTasks() {
 }
 
 export function startInactiveUserJob() {
-  cron.schedule('53 11 * * *', dailyTasks, { scheduled: true, timezone: "America/Sao_Paulo" });
+  cron.schedule('39 11 * * *', dailyTasks, { 
+    scheduled: true, 
+    timezone: "America/Sao_Paulo" 
+  });
   devLog("✅ Job de tarefas diárias (inatividade e sheets) agendado.");
 }
