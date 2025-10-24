@@ -6,33 +6,46 @@ const openai = new OpenAI({
 });
 
 export function sendGreetingMessage(twiml) {
-  twiml.message(`👋 Olá! Sou a ADAP, sua Assistente Financeira Pessoal. Organize suas finanças de forma simples e direta, aqui mesmo no WhatsApp.
+  twiml.message(`👋 Olá! Sou a ADAP, sua Assistente Financeira Pessoal. Confira nossa lista de comandos:
 
-Aqui estão alguns exemplos para começar:
+*1. LANÇAMENTOS MANUAIS* 📝
+ • *25 mercado*
+ • *recebi 2000 salário*
+ • *3500 celular em 10x*
 
-Lançamentos Diários 📝
-› "25 mercado"
-› "150 uber em transporte"
-› "recebi 2000 salário"
+*2. REGISTRO POR FOTO* 📸
+ • _Nota Fiscal de Loja_
+ • _Conta de Consumo (água, luz, etc.)_
+ • _Comprovante de PIX_
 
-Compras Parceladas 💳
-› "3500 PS5 em 10x"
-› "parcelamentos ativos"
+*3. RELATÓRIOS E CONSULTAS* 📊
+ • *ver categorias*: ver, excluir e definir limites mensais para categorias
+ • *saldo*: Mostra o saldo do mês atual
+ • *gasto total* ou *receita total*:
+  - Para o mês atual: *gasto total*
+  - Para um intervalo: *receita de 01/10 até hoje*
+  - Para um único dia: *gastos do dia 20/09*, *gastos de ontem*
+ • _Gráfico de Barras:_ *quais meus gastos nos últimos 7 dias*
+ • _Gráfico de Pizza (Gastos):_ *onde gastei nos últimos 15 dias*
+ • _Gráfico de Pizza (Receitas):_ *gráfico dos meus ganhos*
 
-Relatórios e Gráficos 📊
-› "gasto total"
-› "receita total em junho"
-› "onde gastei nos últimos 30 dias"
-› "quais meus gastos nos últimos 7 dias"
+ *4. ORGANIZAÇÃO* ⏰
+ • *me lembre de pagar o aluguel dia 5*
+ • *quais são meus lembretes*
+ • *parcelamentos ativos*
 
-Lembretes ⏰
-› "me lembre de pagar o aluguel dia 5"
-› "quais são meus lembretes"
+*5. CONTROLE DE ESTOQUE (💎 PLANO DIAMANTE)* 📦
+ • _Criar um Estoque:_ *criar estoque de camisetas*
+ • _Adicionar Produto:_ *adicionar camiseta*
+ • _Ver Produtos:_ *ver estoque de camisetas*
+ • _Movimentar Estoque:_ *vendi 2 #P0001* ou *entrada 10 #P0002*
+ • _Definir Alerta:_ *alerta #P0001 para 5 unidades*
 
-Para apagar algo, use o ID fornecido no registro. Por exemplo:
-› "remover gasto #a4b8c"
-› "excluir parcelamento #J-9tpH"
-› "apagar lembrete #d9bdd3"
+*6. EXCLUIR REGISTROS* 🗑️
+Use sempre o ID (#...) fornecido na mensagem de confirmação.
+ • *remover gasto #a4b8c*
+ • *excluir parcelamento #J-9tpH*
+ • *apagar lembrete #d9bdd3*
 
 Estou aqui para simplificar seu controle financeiro. Vamos começar?`);
 }
@@ -125,7 +138,13 @@ export async function sendReminderMessage(twiml, message, reminderData) {
     max_tokens: 150,
   });
 
-  twiml.message(response.choices[0].message.content);
+  const content = response.choices[0].message.content;
+
+  if (twiml) { 
+    twiml.message(content);
+  } else { 
+    return content;
+  }
 }
 
 export function sendReminderDeletedMessage(twiml, reminderData) {

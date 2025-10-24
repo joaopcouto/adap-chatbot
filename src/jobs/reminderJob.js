@@ -9,61 +9,62 @@ dotenv.config();
 
 async function checkAndSendReminders() {
   const now = new Date();
-  devLog(
-    `[ReminderJob] Executando... Verificando lembretes para antes de ${now.toISOString()}`
-  );
+  devLog(`[ReminderJob] Executando... Verificando lembretes para antes de ${now.toISOString()}`);
 
   try {
-    const dueReminders = await Reminder.find({
-      date: { $lte: now },
-      userPhoneNumber: { $exists: true, $ne: null },
-    });
+    // Process early reminders
+    const earlyReminders = await Reminder.find({
+      status: 'pending',
+      earlyReminderDate: { $lte: now }
+    }).populate({ path: 'userId', model: 'User', select: 'phoneNumber' });
 
-    if (dueReminders.length === 0) {
+    for (const reminder of earlyReminders) {
+      if (!reminder.userId?.phoneNumber) continue;
+      const recipient = formatPhoneNumber(reminder.userId.phoneNumber);
+
+      const earlyDescription = `LEMBRETE ANTECIPADO: ${reminder.description}`;
+      
+      devLog("[ReminderJob] MODO PRODUÇÃO: Enviando lembrete antecipado via Cloud API.");
+      const cloudApiService = new CloudApiService();
+      await cloudApiService.sendTextMessage(recipient, `🔔 ${earlyDescription}`);
+      
+      devLog(`[ReminderJob] Lembrete antecipado #${reminder.messageId} enviado para ${recipient}.`);
+
+      reminder.earlyReminderDate = null;
+      await reminder.save();
+    }
+
+    // Process main reminders
+    const mainReminders = await Reminder.find({
+      status: 'pending',
+      date: { $lte: now }
+    }).populate({ path: 'userId', model: 'User', select: 'phoneNumber' });
+
+    for (const reminder of mainReminders) {
+      if (!reminder.userId?.phoneNumber) continue;
+      const recipient = formatPhoneNumber(reminder.userId.phoneNumber);
+
+      const message = `🔔 Lembrete: ${reminder.description}`;
+
+      devLog("[ReminderJob] MODO PRODUÇÃO: Enviando lembrete principal via Cloud API.");
+      const cloudApiService = new CloudApiService();
+      await cloudApiService.sendTextMessage(recipient, message);
+      
+      devLog(`[ReminderJob] Lembrete principal #${reminder.messageId} enviado para ${recipient}.`);
+      
+      await Reminder.findByIdAndDelete(reminder._id);
+      devLog(`[ReminderJob] Lembrete #${reminder.messageId} excluído.`);
+    }
+
+    if (earlyReminders.length === 0 && mainReminders.length === 0) {
       devLog("[ReminderJob] Nenhum lembrete para enviar.");
-      return;
     }
 
-    devLog(
-      `[ReminderJob] Encontrou ${dueReminders.length} lembrete(s) para enviar.`
-    );
-
-    for (const reminder of dueReminders) {
-      try {
-        const recipient = formatPhoneNumber(reminder.userPhoneNumber);
-
-        if (!recipient) {
-          devLog(
-            `[ReminderJob] Lembrete #${reminder.messageId} tem número inválido. Pulando.`
-          );
-          continue;
-        }
-
-        const message = `🔔 Lembrete: ${reminder.description}`;
-
-        devLog("[ReminderJob] MODO PRODUÇÃO: Enviando via Cloud API.");
-        const cloudApiService = new CloudApiService();
-        await cloudApiService.sendTextMessage(recipient, message);
-        
-        devLog(
-          `[ReminderJob] Lembrete #${reminder.messageId} enviado via template para ${recipient}.`
-        );
-
-        await Reminder.findByIdAndDelete(reminder._id);
-        devLog(`[ReminderJob] Lembrete #${reminder.messageId} excluído.`);
-      } catch (sendError) {
-        devLog(
-          `[ReminderJob] Falha ao enviar ou excluir lembrete #${reminder.messageId}. Erro:`,
-          sendError
-        );
-      }
-    }
   } catch (error) {
     devLog("[ReminderJob] Erro geral ao processar lembretes:", error);
   }
 }
 
-//Roda a cada minuto ('* * * * *')
 export function startReminderJob() {
   devLog("[Scheduler] Job de lembretes iniciado. Verificando a cada minuto.");
   cron.schedule("* * * * *", () => {

@@ -45,7 +45,7 @@ const processInstallmentReminders = async () => {
         try {
           
           await sendTemplateMessage(
-            transaction.userId.phoneNumber, 
+            `whatsapp:${transaction.userId.phoneNumber}`, 
             templateSid, 
             {
             '1': transaction.description,

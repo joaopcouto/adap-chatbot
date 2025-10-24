@@ -223,7 +223,8 @@ export async function interpretMessageWithAI(message, currentDate) {
   - Dia atual: ${currentDay} (${dayOfWeekName})
 
   1. Identificar a Intenção:
-     Determine a intenção do usuário com base em sua mensagem. As possíveis intenções incluem:
+    Priorize intenções relacionadas a "estoque" se as palavras-chave 'criar estoque', 'adicionar ao estoque', 'ver estoque', etc., estiverem presentes.
+    Determine a intenção do usuário com base em sua mensagem. As possíveis intenções incluem:
       "add_income" → O usuário quer registrar uma receita. Extraia o valor, descrição e categoria. 
       "add_expense" → O usuário quer registrar uma despesa. Extraia o valor, descrição e categoria.
       "add_transaction_new_category" → O usuário quer registrar uma transação (receita ou despesa) com uma nova categoria. Extraia o valor, descrição, categoria e tipo.
@@ -234,9 +235,9 @@ export async function interpretMessageWithAI(message, currentDate) {
       "generate_daily_chart" → O usuário quer gerar um gráfico de despesas diárias. Extraia a quantidade de dias.  
       "generate_category_chart" → O usuário quer gerar um gráfico de despesas por categoria. Extraia os dias.
       "generate_income_category_chart" → O usuário quer gerar um gráfico de receitas por categoria. Extraia os dias.
-      "get_total_income" → O usuário quer recuperar o valor total de receitas.
-      "get_total" → O usuário quer recuperar o valor total gasto ou recebido para um mês específico, ou o mês atual, opcionalmente filtrado por uma categoria específica.
-      "get_active_installments" → O usuário quer uma lista de todos os seus planos de parcelamento ativos.
+      "get_total_income" → O usuário quer recuperar o valor total de receitas para um período específico (dia, intervalo de datas) ou para o mês atual, opcionalmente filtrado por uma categoria específica.
+      "get_total" → O usuário quer recuperar o valor total gasto para um período específico (dia, intervalo de datas) ou para o mês atual, opcionalmente filtrado por uma categoria específica.
+      "get_balance" → O usuário quer ver o saldo do mês atual."get_active_installments" → O usuário quer uma lista de todos os seus planos de parcelamento ativos.
       "detalhes" → O usuário quer mostrar uma lista de todos os itens em uma determinada data"
       "greeting" → O usuário envia uma saudação (ex: "Oi", "Olá").
       "instructions" → O usuário pergunta como usar o assistente ou o que ele pode fazer.
@@ -251,6 +252,16 @@ export async function interpretMessageWithAI(message, currentDate) {
       "google_debug" → O usuário quer informações de diagnóstico sobre a configuração Google.
       "google_test_url" → O usuário quer testar a URL OAuth diretamente.
       "financial_help" → O usuário faz uma pergunta geral relacionada a finanças (ex: investimentos, poupança, estratégias).
+      "create_inventory_template" -> O usuário quer criar um novo tipo de produto para o estoque. Extraia o nome do template.
+      "add_product_to_inventory" -> O usuário quer adicionar um novo item a um estoque existente. Extraia o nome do template.
+      "list_inventory_templates" -> O usuário quer ver todos os tipos de estoque que ele já criou.
+      "update_inventory_quantity" -> O usuário quer registrar uma entrada ou saída de um produto no estoque. Extraia a quantidade e o ID do produto.
+      "view_inventory" -> O usuário quer listar os produtos de um estoque específico. Extraia o nome do template.
+      "set_inventory_alert" -> O usuário quer definir o nível mínimo de estoque para um produto. Extraia o productId e a quantidade.
+      "set_early_reminder" -> O usuário quer definir um lembrete antecipado. Extraia o valor numérico e a unidade (minutos/horas).
+      "list_categories" -> O usuário quer ver a lista de todas as suas categorias criadas.
+      "delete_category" -> O usuário quer excluir uma categoria e todos os seus lançamentos. Extraia o nome da categoria.
+      "set_category_limit" -> O usuário quer definir um limite de gasto mensal para uma categoria. Extraia o nome da categoria e o valor do limite.
       "unknown" → A mensagem não corresponde a nenhuma das intenções acima.
   
   2. Regras de Extração de Dados:
@@ -258,14 +269,13 @@ export async function interpretMessageWithAI(message, currentDate) {
     - Para "add_installment_expense": Extraia 'totalAmount', 'description' e 'installments'. A estrutura é tipicamente "(valor total) (descrição) em (parcelas)x" ou "parcelar (descrição) de (valor total) em (parcelas) vezes".
     - Para "delete_transaction": Extraia 'messageId'.
     - Para "reminder": Extraia 'description' e 'date' no formato ISO 8601.
-    - Para "get_total" ou "get_total_income", se o usuário mencionar um mês (ex: "em Janeiro"), use o **Ano Atual** do contexto para formar o campo "month" (ex: "${currentYear}-01").
     - Para "reminder", resolva datas relativas como "amanhã", "dia 15", "próxima segunda" usando o **Contexto de Data Atual**. O formato da data deve ser ISO 8601 (YYYY-MM-DDTHH:mm:ss.sssZ).
+    - Para as intenções "get_total" ou "get_total_income":
+      - Se o usuário disser "receita total" ou "gasto total" sem especificar datas, use o mês atual. O campo 'month' deverá ser o mês e ano atual no formato "YYYY-MM" e 'monthName' o nome do mês atual.
+      - Se o usuário especificar um período como "receita de DD/MM até DD/MM" ou "gastos do dia DD/MM", extraia 'startDate' e 'endDate' no formato ISO 8601 (YYYY-MM-DDTHH:mm:ss.sssZ). Para um único dia, 'startDate' e 'endDate' serão o mesmo dia, com 'startDate' no início do dia e 'endDate' no final do dia.
     - Regra de Categoria: Se a categoria fornecida NÃO estiver na lista de categorias válidas, a intenção DEVE ser "add_transaction_new_category".
       - Categorias válidas (despesa): "gastos fixos", "lazer", "investimento", "conhecimento", "doação"
       - Categorias válidas (receita): "Salário", "Renda Extra"
-
-
-  3. Regras de Validação e Categorização:
     - Se a categoria não for especificada, determine-a com base na descrição usando as categorias válidas.
     - Se a categorização não estiver clara ou o usuário tiver acesso a "add_transaction_new_category" (categorias definidas pelo usuário), e houver uma despesa/receita passada com a mesma descrição, reutilize a última categoria conhecida usada para essa descrição.
     - Para a intenção "get_total", a categoria deve ser especificada, e pode ser qualquer categoria, incluindo as definidas pelo usuário.
@@ -278,27 +288,33 @@ export async function interpretMessageWithAI(message, currentDate) {
         Seja preciso: "onde" é sobre localização/tipo, "quais" é sobre listar as despesas dia a dia.
       - Se a pergunta envolver **"receitas"**, **"ganhos"** ou **"de onde veio"** e pedir um gráfico → use "generate_income_category_chart".
         Ex: "gráfico dos meus ganhos", "de onde vieram minhas receitas nos últimos 10 dias".
-  
-  4. Formato de Resposta:
+      - **Prioridade de Lembretes:** Se a frase contiver um comando claro para criar um lembrete (ex: "me lembre", "lembrar de", "anote"), a intenção DEVE ser "reminder". A intenção "set_early_reminder" é APENAS para respostas curtas que definem um tempo (ex: "15 minutos antes", "1 hora").
+
+  3. Formato de Resposta:
        Responda apenas com um objeto JSON válido sem qualquer formatação ou explicação adicional
      - Retorne um objeto JSON com a intenção e dados extraídos. Use este formato:
        {
-         "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "delete_list_item" | "generate_daily_chart" | "generate_category_chart" | "generate_income_category_chart" | "get_total_income" |"get_total" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "google_connect" | "google_disconnect" | "google_status" | "google_enable_sync" | "google_disable_sync" | "google_debug" | "financial_help",
+        "intent": "add_income" | "add_expense" | "add_transaction_new_category" | "add_installment_expense" | "delete_transaction" | "delete_list_item" | "generate_daily_chart" | "generate_category_chart" | "generate_income_category_chart" | "get_total_income" |"get_total" | "get_balance" | "get_active_installments" | "greeting" | "instructions" | "reminder" | "delete_reminder" | "get_total_reminders" | "google_connect" | "google_disconnect" | "google_status" | "google_enable_sync" | "google_disable_sync" | "google_debug" | "financial_help" | "create_inventory_template" | "add_product_to_inventory" | "list_inventory_templates" | "update_inventory_quantity" | "view_inventory" | "set_inventory_alert" | "set_early_reminder" | "list_categories" | "delete_category" | "set_category_limit" ,
          "data": {
            "amount": number,
            "description": string,
            "category": string,
+           "templateName": string,
+           "quantity": number,     
+           "productId": string, 
            "installmentsGroupId": string,
            "itemNumber": number,
            "messageId": string,
            "days": number,
-           "month": string,
+           "month": string, // YYYY-MM
            "monthName": string,
+           "startDate": string, // ISO 8601 (YYYY-MM-DDTHH:mm:ss.sssZ) - Início do período (00:00:00.000)
+           "endDate": string,   // ISO 8601 (YYYY-MM-DDTHH:mm:ss.sssZ) - Fim do período (23:59:59.999)
            "date": string,
          }
        }
   
-  5. Exemplos de Entradas do Usuário e Saídas Corretas: 
+  4. Exemplos de Entradas do Usuário e Saídas Corretas: 
     - Usuário: "Recebi 1000 reais de salário"
       Resposta: { "intent": "add_income", "data": { "amount": 1000, "description": "salário", "category": null } }
 
@@ -308,6 +324,10 @@ export async function interpretMessageWithAI(message, currentDate) {
       Resposta: { "intent": "add_expense", "data": { "amount": 15, "description": "uber", "category": null } }
     - Usuário: "100 cofrinho inter em investimento"
       Resposta: { "intent": "add_expense", "data": { "amount": 100, "description": "cofrinho inter", "category": "investimento" } }
+    - Usuário: "Paguei 50 no almoço"
+      Resposta: { "intent": "add_expense", "data": { "amount": 50, "description": "almoço", "category": null } }
+    - Usuário: "paguei 150,00 de luz em gastos fixos"
+      Resposta: { "intent": "add_expense", "data": { "amount": 150.00, "description": "luz", "category": "gastos fixos" } }
 
     - Usuário: "Recebi 20 com freelance na categoria extras"
       Resposta: { "intent": "add_transaction_new_category", "data": { "amount": 20, "description": "freelance", "category": "extras", "type": "income" } }
@@ -346,21 +366,26 @@ export async function interpretMessageWithAI(message, currentDate) {
       Resposta: { "intent": "generate_income_category_chart", "data": { "days": 30}}
 
     - Usuário: "Qual é o meu gasto total?"
-      Resposta: { "intent": "get_total", "data": {} }
-    - Usuário: "Gasto total"
-      Resposta: { "intent": "get_total", "data": {} }
-    - Usuário: "Qual meu gasto total com lazer?"
-      Resposta: { "intent": "get_total", "data": { "category": "lazer" } }
-    - Usuário: "Qual meu gasto total com transporte em Janeiro?"
-      Resposta: { "intent": "get_total", "data": { "category": "transporte", "month": "${currentYear}-01", "monthName": "Janeiro" } }
-    - Usuário: "Quanto gastei em fevereiro?"
-      Resposta: { "intent": "get_total", "data": { "month": "${currentYear}-02", "monthName": "Fevereiro" } }
+      Resposta: { "intent": "get_total", "data": { "month": "${currentYear}-${currentMonth}", "monthName": "${monthName}" } }
+    - Usuário: "Gasto total de 25/09 até 07/10"
+      Resposta: { "intent": "get_total", "data": { "startDate": "${currentYear}-09-25T03:00:00.000Z", "endDate": "${currentYear}-10-07T23:59:59.999Z" } }
+    - Usuário: "gasto total do dia 20/08"
+      Resposta: { "intent": "get_total", "data": { "startDate": "${currentYear}-08-20T03:00:00.000Z", "endDate": "${currentYear}-08-20T23:59:59.999Z" } }
+    - Usuário: "Gasto total em transporte de 25/09 até 07/10"
+      Resposta: { "intent": "get_total", "data": { "category": "transporte", "startDate": "${currentYear}-09-25T03:00:00.000Z", "endDate": "${currentYear}-10-07T23:59:59.999Z" } }
 
-    - Usuário: "Me mostre a receita de Renda Extra do mês de maio"  
-      Resposta: { "intent": "get_total_income", "data": { "category": "Renda Extra", "month": "${currentYear}-05", "monthName": "Maio" } }
     - Usuário: "Qual é a minha receita total?"
-      Resposta: { "intent": "get_total_income", "data": { } }
-     
+      Resposta: { "intent": "get_total_income", "data": { "month": "${currentYear}-${currentMonth}", "monthName": "${monthName}" } }
+    - Usuário: "Receita de 10/01 até 15/01"  
+      Resposta: { "intent": "get_total_income", "data": { "startDate": "${currentYear}-01-10T03:00:00.000Z", "endDate": "${currentYear}-01-15T23:59:59.999Z" } }
+    - Usuário: "Receita de Renda Extra do dia 05/02"  
+      Resposta: { "intent": "get_total_income", "data": { "category": "Renda Extra", "startDate": "${currentYear}-02-05T03:00:00.000Z", "endDate": "${currentYear}-02-05T23:59:59.999Z" } }
+  
+    - Usuário: "ver saldo"
+      Resposta: { "intent": "get_balance", "data": {} }
+    - Usuário: "qual meu saldo?"
+      Resposta: { "intent": "get_balance", "data": {} }
+
     - Usuário: "detalhes"
       Resposta: { "intent": "detalhes", "data": {} }
 
@@ -385,6 +410,31 @@ export async function interpretMessageWithAI(message, currentDate) {
 
     - Usuário: "Quais são meus lembretes?"
       Resposta: { "intent": "get_total_reminders", "data":{} }
+    - Usuário: "15 minutos antes"
+      Resposta: { "intent": "set_early_reminder", "data": { "value": 15, "unit": "minutos" } }
+    - Usuário: "sim, me lembre 1 hora antes"
+      Resposta: { "intent": "set_early_reminder", "data": { "value": 1, "unit": "hora" } }
+    - Usuário: "2 horas"
+      Resposta: { "intent": "set_early_reminder", "data": { "value": 2, "unit": "horas" } }
+    - Usuário: "me lembre em 15 minutos" // CONTÉM "me lembre", então NÃO é 'set_early_reminder'
+      Resposta: { "intent": "reminder", "data": { "description": "lembrete", "date": "..." } }
+
+    - Usuário: "ver categorias"
+      Resposta: { "intent": "list_categories", "data": {} }
+    - Usuário: "minhas categorias"
+      Resposta: { "intent": "list_categories", "data": {} }
+
+    - Usuário: "excluir categoria alimentação"
+      Resposta: { "intent": "delete_category", "data": { "category": "alimentação" } }
+    - Usuário: "apagar categoria lazer"
+      Resposta: { "intent": "delete_category", "data": { "category": "lazer" } }
+
+    - Usuário: "definir limite alimentação para 500"
+      Resposta: { "intent": "set_category_limit", "data": { "category": "alimentação", "amount": 500 } }
+    - Usuário: "limite de gastos para lazer R$ 200"
+      Resposta: { "intent": "set_category_limit", "data": { "category": "lazer", "amount": 200 } }
+    - Usuário: "limite mercado 300"
+      Resposta: { "intent": "set_category_limit", "data": { "category": "mercado", "amount": 300 } }
 
     - Usuário: "Conectar Google Calendar"
       Resposta: { "intent": "google_connect", "data": {} }
@@ -420,14 +470,50 @@ export async function interpretMessageWithAI(message, currentDate) {
 
     - Usuário: "Devo investir mais em ações ou renda fixa?"
       Resposta: { "intent": "financial_help", "data": {} }
-     
-  
+
+    - Usuário: "criar estoque de camisetas"
+      Resposta: { "intent": "create_inventory_template", "data": { "templateName": "camisetas" } }
+    - Usuário: "criar um estoque para bebidas"
+      Resposta: { "intent": "create_inventory_template", "data": { "templateName": "bebidas" } }
+
+    - Usuário: "adicionar camiseta"
+      Resposta: { "intent": "add_product_to_inventory", "data": { "templateName": "camiseta" } }
+    - Usuário: "quero adicionar uma nova bebida"
+      Resposta: { "intent": "add_product_to_inventory", "data": { "templateName": "bebida" } }
+      
+    - Usuário: "quais estoques eu tenho?"
+      Resposta: { "intent": "list_inventory_templates", "data": {} }
+    - Usuário: "meus estoques"
+      Resposta: { "intent": "list_inventory_templates", "data": {} }
+      
+    - Usuário: "ver estoque de livros"
+      Resposta: { "intent": "view_inventory", "data": { "templateName": "livros" } }
+    - Usuário: "me mostre minhas camisetas em estoque"
+      Resposta: { "intent": "view_inventory", "data": { "templateName": "camisetas" } }
+    
+    - Usuário: "entrada 10 #P0001"
+      Resposta: { "intent": "update_inventory_quantity", "data": { "quantity": 10, "productId": "P0001" } }
+    - Usuário: "saída de 3 #P0002"
+      Resposta: { "intent": "update_inventory_quantity", "data": { "quantity": -3, "productId": "P0002" } }
+    - Usuário: "vendi 1 #p0003"
+      Resposta: { "intent": "update_inventory_quantity", "data": { "quantity": -1, "productId": "p0003" } }
+
+    - Usuário: "definir alerta #P0001 para 10 unidades"
+      Resposta: { "intent": "set_inventory_alert", "data": { "productId": "P0001", "quantity": 10 } }
+    - Usuário: "alerta do #p0002 para 5"
+      Resposta: { "intent": "set_inventory_alert", "data": { "productId": "p0002", "quantity": 5 } }
+    - Usuário: "avise-me quando #P0003 estiver com 20"
+      Resposta: { "intent": "set_inventory_alert", "data": { "productId": "P0003", "quantity": 20 } }
+    
+    
+      
+
   Agora, interprete esta mensagem: "${message}"`;
 
   const response = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [{ role: "user", content: prompt }],
-    max_tokens: 150,
+    max_tokens: 400,
   });
 
   try {
@@ -447,6 +533,7 @@ export async function interpretMessageWithAI(message, currentDate) {
 }
 
 export async function interpretDocumentWithAI(imageUrl) {
+
   const prompt = `Você é um especialista em analisar IMAGENS de documentos financeiros brasileiros. Sua primeira tarefa é CLASSIFICAR o tipo de documento. Depois, extrair os dados relevantes.
 
   **1. CLASSIFICAÇÃO:**
@@ -462,19 +549,16 @@ export async function interpretDocumentWithAI(imageUrl) {
   - **totalAmount**: Extraia o valor final pago. Use a lógica de prioridade: "Valor a Pagar" > Valor na linha da "Forma de Pagamento" > "Valor Total".
   - **storeName**: Extraia o nome do estabelecimento.
   - **purchaseDate**: Extraia a data da compra.
-  - **category**: Sugira uma categoria apropriada (ex: Supermercado -> "Alimentação").
 
   **Se o tipo for 'utility_bill':**
   - **totalAmount**: Extraia o valor principal da conta (Total a Pagar).
   - **provider**: Extraia o nome da empresa fornecedora (ex: "ENEL", "CLARO S.A.").
   - **dueDate**: Extraia a DATA DE VENCIMENTO.
-  - **category**: A categoria deve ser "Gastos Fixos".
 
   **Se o tipo for 'pix_receipt':**
   - **totalAmount**: Extraia o valor do PIX.
   - **counterpartName**: Extraia o nome do beneficiário (para quem foi pago) ou do pagador (de quem recebeu). É o nome da "outra ponta" da transação.
   - **transactionDate**: Extraia a data em que o PIX foi efetivado.
-  - **category**: A categoria deve ser "Transferência".
 
   **REGRAS GERAIS:**
   - Todas as datas devem ser retornadas no formato YYYY-MM-DD.
@@ -486,8 +570,7 @@ export async function interpretDocumentWithAI(imageUrl) {
     "documentType": "store_receipt" | "utility_bill" | "pix_receipt" | "unknown",
     "data": {
       "totalAmount": 123.45,
-      // Campos específicos de cada tipo
-      "storeName": "NOME DA LOJA", "purchaseDate": "2025-08-23", "category": "Alimentação",
+      "storeName": "NOME DA LOJA", "purchaseDate": "2025-08-23",
       "provider": "NOME DA EMPRESA", "dueDate": "2025-09-10",
       "counterpartName": "NOME DO BENEFICIÁRIO/PAGADOR", "transactionDate": "2025-08-22"
     }

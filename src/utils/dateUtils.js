@@ -1,4 +1,4 @@
-import { format, formatInTimeZone } from "date-fns-tz";
+import { formatInTimeZone, toZonedTime } from "date-fns-tz";
 import ptBR from "date-fns/locale/pt-BR";
 
 export const TIMEZONE = "America/Sao_Paulo";
@@ -21,3 +21,5 @@ export function formatInBrazilWithTime(date) {
   });
   return formattedDate.replace(" ", " às ");
 }
+
+
