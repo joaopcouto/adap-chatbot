@@ -8,11 +8,17 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 async function findAndNotifyInactiveUsers() {
+  devLog("[InactiveUserJob] Iniciando verificação de usuários inativos...");
+
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  sevenDaysAgo.setHours(23, 59, 59, 999);
 
   try {
-    const inactiveUsers = await UserActivity.find({ lastInteractionAt: { $lte: sevenDaysAgo } });
+    const inactiveUsers = await UserActivity.find({
+      lastInteractionAt: { $lte: sevenDaysAgo },
+    });
+    
     if (inactiveUsers.length === 0) {
       devLog("[InactiveUserJob] Nenhum usuário inativo encontrado para notificar hoje.");
       return;
@@ -32,6 +38,6 @@ async function dailyTasks() {
 }
 
 export function startInactiveUserJob() {
-  cron.schedule('46 11 * * *', dailyTasks, { scheduled: true, timezone: "America/Sao_Paulo" });
+  cron.schedule('53 11 * * *', dailyTasks, { scheduled: true, timezone: "America/Sao_Paulo" });
   devLog("✅ Job de tarefas diárias (inatividade e sheets) agendado.");
 }
