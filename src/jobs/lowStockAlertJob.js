@@ -1,7 +1,7 @@
 import cron from "node-cron";
 import Product from "../models/Product.js";
 import User from "../models/User.js";
-import { sendTemplateMessage } from "../services/twilioService.js";
+import CloudApiService from "../services/cloudApiService.js";
 import { devLog } from "../helpers/logger.js";
 import dotenv from 'dotenv';
 
@@ -22,11 +22,7 @@ const processLowStockAlerts = async () => {
 
     devLog(`[CRON JOB] Encontrados ${lowStockProducts.length} produtos com estoque baixo para notificar.`);
 
-    const templateSid = process.env.TWILIO_LOW_STOCK_TEMPLATE_SID;
-    if (!templateSid) {
-        devLog("[CRON JOB] ERRO: TWILIO_LOW_STOCK_TEMPLATE_SID não definido no .env");
-        return;
-    }
+
 
     for (const product of lowStockProducts) {
       try {
@@ -34,14 +30,10 @@ const processLowStockAlerts = async () => {
         if (user && user.phoneNumber) {
           const description = Object.values(Object.fromEntries(product.attributes)).join(' ');
 
-          await sendTemplateMessage(
-            `whatsapp:${user.phoneNumber}`,
-            templateSid,
-            {
-              '1': description,       
-              '2': product.quantity.toString() 
-            }
-          );
+          const cloudApiService = new CloudApiService();
+          const message = `⚠️ *Alerta de Estoque Baixo!*\n\nProduto: *${description}*\nQuantidade atual: *${product.quantity}*\n\nReponha seu estoque para não perder vendas! 📦`;
+          
+          await cloudApiService.sendTextMessage(user.phoneNumber, message);
 
           devLog(`Alerta de estoque baixo para "${description}" enviado para ${user.phoneNumber}`);
         }

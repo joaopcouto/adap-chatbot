@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import Permissions from '../models/Permissions.js';
 import User from '../models/User.js'; 
-import { sendTemplateMessage } from '../services/twilioService.js';
+import CloudApiService from '../services/cloudApiService.js';
 import { devLog } from '../helpers/logger.js';
 import dotenv from 'dotenv';
 
@@ -38,19 +38,17 @@ async function checkAndSendSubscriptionReminders() {
 
     devLog(`[SubscriptionJob] Encontradas ${expiringPermissions.length} assinaturas para lembrar.`);
 
-    const templateSid = process.env.TWILIO_EXPIRATION_TEMPLATE_SID;
+
 
     for (const permission of expiringPermissions) {
       if (permission.userId && permission.userId.phoneNumber) {
         const user = permission.userId;
         
-        await sendTemplateMessage(
-          user.phoneNumber,
-          templateSid,
-          {
-            '1': user.name.split(' ')[0], 
-          }
-        );
+        const cloudApiService = new CloudApiService();
+        const firstName = user.name.split(' ')[0];
+        const message = `Olá ${firstName}! 🔔 Sua assinatura da ADAP expira amanhã. Renove agora para continuar organizando suas finanças! 💰 Acesse: adapfinanceira.com.br/planos`;
+        
+        await cloudApiService.sendTextMessage(user.phoneNumber, message);
 
         devLog(`[SubscriptionJob] Lembrete de expiração enviado para ${user.name} (${user.phoneNumber}).`);
       }

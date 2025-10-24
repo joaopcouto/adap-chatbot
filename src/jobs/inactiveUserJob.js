@@ -1,6 +1,6 @@
 import cron from "node-cron";
 import UserActivity from "../models/UserActivity.js";
-import { sendTemplateMessage } from "../services/twilioService.js";
+import CloudApiService from "../services/cloudApiService.js";
 import { syncUserActivityToSheet } from '../services/googleSheetsService.js';
 import { devLog } from "../helpers/logger.js";
 import dotenv from 'dotenv';
@@ -15,9 +15,12 @@ async function findAndNotifyInactiveUsers() {
     const inactiveUsers = await UserActivity.find({ lastInteractionAt: { $lte: sevenDaysAgo } });
     if (inactiveUsers.length === 0) return;
 
-    const templateSid = process.env.TWILIO_INACTIVE_USER_TEMPLATE_SID;
+    const cloudApiService = new CloudApiService();
     for (const user of inactiveUsers) {
-      await sendTemplateMessage(`whatsapp:${user.phoneNumber}`, templateSid, { '1': user.name.split(' ')[0] });
+      const firstName = user.name.split(' ')[0];
+      const message = `Olá ${firstName}! 👋 Sentimos sua falta! Que tal voltar a organizar suas finanças com a ADAP? Estamos aqui para ajudar! 💰`;
+      await cloudApiService.sendTextMessage(user.phoneNumber, message);
+      devLog(`[InactiveUserJob] Mensagem de reativação enviada para ${user.name} (${user.phoneNumber}).`);
     }
   } catch (error) { devLog("Erro no job de inatividade:", error); }
 }

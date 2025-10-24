@@ -1,7 +1,7 @@
 import cron from "node-cron";
 import Transaction from "../models/Transaction.js";
 import { devLog } from "../helpers/logger.js";
-import { sendTemplateMessage } from "../services/whatsappService.js";
+import CloudApiService from "../services/cloudApiService.js";
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -43,15 +43,10 @@ const processInstallmentReminders = async () => {
     for (const transaction of upcomingInstallments) {
       if (transaction.userId && transaction.userId.phoneNumber) {
         try {
+          const cloudApiService = new CloudApiService();
+          const message = `💳 *Lembrete de Parcela*\n\n📝 ${transaction.description}\n💰 Valor: R$ ${transaction.amount.toFixed(2).replace(".", ",")}\n\n⏰ Vence hoje! Não esqueça de efetuar o pagamento.`;
           
-          await sendTemplateMessage(
-            `whatsapp:${transaction.userId.phoneNumber}`, 
-            templateSid, 
-            {
-            '1': transaction.description,
-            '2': transaction.amount.toFixed(2).replace(".", ","),
-          });
-          
+          await cloudApiService.sendTextMessage(transaction.userId.phoneNumber, message);
 
           devLog(
             `Lembrete de parcela enviado com sucesso para ${transaction.userId.phoneNumber} sobre "${transaction.description}"`
