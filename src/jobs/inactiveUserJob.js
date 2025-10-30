@@ -40,13 +40,9 @@ async function findAndNotifyInactiveUsers() {
           '1': firstName
         };
 
-        await sendTemplateMessage(
-          `whatsapp:${user.phoneNumber}`, 
-          templateSid, 
-          contentVariables
-        );
+        //await sendTemplateMessage(`whatsapp:${user.phoneNumber}`, templateSid, contentVariables);
 
-        devLog(`[InactiveUserJob] Lembrete de inatividade enviado para ${user.name} (${user.phoneNumber}).`);
+        //devLog(`[InactiveUserJob] Lembrete de inatividade enviado para ${user.name} (${user.phoneNumber}).`);
 
       } catch (sendError) {
         devLog(`[InactiveUserJob] Falha ao ENVIAR lembrete para ${user.name}. Erro: ${sendError.message}`);
