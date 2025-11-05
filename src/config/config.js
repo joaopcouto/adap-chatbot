@@ -106,6 +106,12 @@ class ConfigManager {
         syncRetryJitterFactor: parseFloat(process.env.SYNC_RETRY_JITTER_FACTOR) || 0.1,
       },
       
+      // Reminder System Configuration
+      reminders: {
+        timezone: process.env.TIMEZONE || 'America/Sao_Paulo',
+        earlyReminderBufferMinutes: parseInt(process.env.EARLY_REMINDER_BUFFER) || 5,
+      },
+      
       // Token Encryption
       encryption: {
         key: process.env.TOKEN_ENCRYPTION_KEY || process.env.ENCRYPTION_KEY || 'default-key-for-development-only',
@@ -216,6 +222,16 @@ class ConfigManager {
     } catch (error) {
       this.validationErrors.push(`Invalid timezone: ${this.config.googleCalendar.defaultTimezone}`);
     }
+
+    // Validate reminder timezone
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: this.config.reminders.timezone });
+    } catch (error) {
+      this.validationErrors.push(`Invalid reminder timezone: ${this.config.reminders.timezone}`);
+    }
+
+    // Validate early reminder buffer
+    this.validateNumericRange('reminders.earlyReminderBufferMinutes', 1, 60); // 1 minute to 1 hour
 
     // Validate WhatsApp Cloud API specific configurations
     this.validateWhatsAppCloudApiConfig();
@@ -543,6 +559,10 @@ class ConfigManager {
           'MIGRATION_ROLLBACK_THRESHOLD - Error rate threshold for automatic rollback (0-1, default: 0.05)',
           'MIGRATION_VALIDATION_SAMPLE_SIZE - Sample size for validation (default: 50)'
         ],
+        reminders: [
+          'TIMEZONE - Timezone for reminder processing (default: America/Sao_Paulo)',
+          'EARLY_REMINDER_BUFFER - Buffer time in minutes for early reminder validation (default: 5)'
+        ],
         optional: [
           'NODE_ENV - Environment (development/test/production)',
           'PORT - Server port (default: 3000)',
@@ -615,6 +635,11 @@ AUDIO_PROCESSING_TIMEOUT=30000
 AUDIO_TEMP_DIR=/tmp
 WHISPER_MODEL=whisper-1
 WHISPER_LANGUAGE=pt
+        `,
+        reminders: `
+# Reminder System Configuration
+TIMEZONE=America/Sao_Paulo
+EARLY_REMINDER_BUFFER=5
         `
       }
     };

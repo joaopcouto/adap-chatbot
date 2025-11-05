@@ -9,6 +9,18 @@ export const generateCorrelationId = () => {
 };
 
 /**
+ * Generate a reminder-specific correlation ID
+ * @param {string} userId - User ID
+ * @param {string} operation - Operation type
+ * @returns {string} Reminder correlation ID
+ */
+const generateReminderCorrelationId = (userId, operation) => {
+  const timestamp = Date.now();
+  const randomId = crypto.randomBytes(3).toString('hex');
+  return `reminder-${operation}-${userId}-${timestamp}-${randomId}`;
+};
+
+/**
  * Log levels for structured logging
  */
 export const LOG_LEVELS = {
@@ -546,13 +558,133 @@ class StructuredLogger {
       }
     });
   }
+
+  /**
+   * Log reminder operation with timezone information
+   * @param {string} operation - Reminder operation (e.g., 'create', 'process', 'send')
+   * @param {Object} context - Reminder context including timezone info
+   */
+  reminderOperation(operation, context = {}) {
+    const level = context.error ? 'error' : 'info';
+    const message = `Reminder operation: ${operation}`;
+    
+    // Add timezone information to context
+    const enhancedContext = {
+      ...context,
+      operation,
+      type: 'REMINDER_OPERATION',
+      timezone: context.timezone || process.env.TIMEZONE || 'America/Sao_Paulo',
+      timestamp: new Date().toISOString()
+    };
+
+    // Add timezone-specific timestamps if dates are provided
+    if (context.reminderDate) {
+      enhancedContext.reminderDateUTC = context.reminderDate;
+      enhancedContext.reminderDateLocal = this._formatDateInTimezone(context.reminderDate, enhancedContext.timezone);
+    }
+
+    if (context.currentDate) {
+      enhancedContext.currentDateUTC = context.currentDate;
+      enhancedContext.currentDateLocal = this._formatDateInTimezone(context.currentDate, enhancedContext.timezone);
+    }
+
+    this[level](message, enhancedContext);
+  }
+
+  /**
+   * Log timezone conversion operations
+   * @param {string} operation - Conversion operation (e.g., 'toUTC', 'fromUTC', 'validate')
+   * @param {Object} context - Conversion context
+   */
+  timezoneOperation(operation, context = {}) {
+    this.debug(`Timezone operation: ${operation}`, {
+      ...context,
+      operation,
+      type: 'TIMEZONE_OPERATION',
+      timezone: context.timezone || process.env.TIMEZONE || 'America/Sao_Paulo'
+    });
+  }
+
+  /**
+   * Log audit events for reminder system
+   * @param {string} event - Audit event type
+   * @param {Object} context - Event context
+   */
+  auditLog(event, context = {}) {
+    this.info(`Audit event: ${event}`, {
+      ...context,
+      event,
+      type: 'AUDIT_LOG',
+      auditTimestamp: new Date().toISOString(),
+      correlationId: context.correlationId || generateCorrelationId()
+    });
+  }
+
+  /**
+   * Log early reminder validation events
+   * @param {string} result - Validation result ('valid', 'invalid', 'error')
+   * @param {Object} context - Validation context
+   */
+  earlyReminderValidation(result, context = {}) {
+    const level = result === 'error' ? 'error' : result === 'invalid' ? 'warn' : 'info';
+    const message = `Early reminder validation: ${result}`;
+    
+    this[level](message, {
+      ...context,
+      result,
+      type: 'EARLY_REMINDER_VALIDATION',
+      bufferMinutes: context.bufferMinutes || process.env.EARLY_REMINDER_BUFFER || 5,
+      timezone: context.timezone || process.env.TIMEZONE || 'America/Sao_Paulo'
+    });
+  }
+
+  /**
+   * Log reminder job execution events
+   * @param {string} phase - Job phase ('start', 'processing', 'complete', 'error')
+   * @param {Object} context - Job context
+   */
+  reminderJob(phase, context = {}) {
+    const level = phase === 'error' ? 'error' : 'info';
+    const message = `Reminder job ${phase}`;
+    
+    this[level](message, {
+      ...context,
+      phase,
+      type: 'REMINDER_JOB',
+      timezone: context.timezone || process.env.TIMEZONE || 'America/Sao_Paulo',
+      jobTimestamp: new Date().toISOString()
+    });
+  }
+
+  /**
+   * Format date in specific timezone for logging
+   * @param {Date|string} date - Date to format
+   * @param {string} timezone - Target timezone
+   * @returns {string} Formatted date string
+   */
+  _formatDateInTimezone(date, timezone) {
+    try {
+      const dateObj = typeof date === 'string' ? new Date(date) : date;
+      return dateObj.toLocaleString('pt-BR', { 
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+      });
+    } catch (error) {
+      return date?.toString() || 'Invalid Date';
+    }
+  }
 }
 
 // Create singleton instance
 const structuredLogger = new StructuredLogger();
 
-// Export structured logger
-export { structuredLogger };
+// Export structured logger and correlation ID generators
+export { structuredLogger, generateReminderCorrelationId };
 
 // Keep backward compatibility with existing devLog
 export const devLog = (...args) => {

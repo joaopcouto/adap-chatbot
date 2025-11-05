@@ -5,11 +5,19 @@ import {
   sendTextMessageTEST,
 } from "../services/whatsappService.js";
 import { sendCloudApiMessage } from "../helpers/cloudApiMessageHelper.js";
-import { devLog, structuredLogger } from "../helpers/logger.js";
+import { devLog, structuredLogger, generateReminderCorrelationId } from "../helpers/logger.js";
 import { generateCorrelationId } from "../helpers/logger.js";
 import User from "../models/User.js";
 import { fromZonedTime } from "date-fns-tz";
-import { TIMEZONE } from "../utils/dateUtils.js";
+import { 
+  TIMEZONE, 
+  createReminderDate, 
+  convertToUTCForStorage,
+  convertFromUTCForProcessing,
+  getCurrentDateInBrazil,
+  formatDateTimeInBrazil,
+  validateEarlyReminderTime 
+} from "../utils/dateUtils.js";
 import cloudApiConfig from "../config/cloudApiConfig.js";
 
 import {
@@ -40,6 +48,7 @@ import Transaction from "../models/Transaction.js";
 import PaymentMethod from "../models/PaymentMethod.js";
 import Category from "../models/Category.js";
 import UserStats from "../models/UserStats.js";
+import InventoryTemplate from "../models/InventoryTemplate.js";
 import { customAlphabet } from "nanoid";
 import {
   sendGreetingMessage,
@@ -71,6 +80,129 @@ import googleIntegrationWhatsAppService from "../services/googleIntegrationWhats
 
 const router = express.Router();
 let conversationState = {};
+
+/**
+ * Process a single Cloud API message
+ */
+async function processSingleCloudApiMessage(message, contacts, metadata) {
+  try {
+    console.log("🔍 PROCESSSINGLE DEBUG - Mensagem recebida:");
+    console.log("Message:", JSON.stringify(message, null, 2));
+    console.log("Contacts:", JSON.stringify(contacts, null, 2));
+    console.log("Metadata:", JSON.stringify(metadata, null, 2));
+
+    structuredLogger.info("processSingleCloudApiMessage called", {
+      message,
+      contacts,
+      metadata,
+    });
+
+    const { id, from, timestamp, type, text, image, audio, document } = message;
+
+    // Skip status messages and other non-user messages
+    if (!from || !type) {
+      structuredLogger.debug("Skipping non-user message", { id, type });
+      return;
+    }
+
+    structuredLogger.info("Processing Cloud API message", {
+      messageId: id,
+      from,
+      type,
+      timestamp,
+    });
+
+    // Extract user message content based on message type
+    let userMessage = "";
+    let isImage = false;
+    let mediaUrl = null;
+
+    switch (type) {
+      case "text":
+        userMessage = text?.body || "";
+        break;
+
+      case "image":
+        isImage = true;
+        mediaUrl = image?.id; // Cloud API provides media ID, not direct URL
+        userMessage = image?.caption || "";
+        break;
+
+      case "audio":
+        mediaUrl = audio?.id;
+        userMessage = "[Audio message]"; // Will be transcribed in processing
+        break;
+
+      case "document":
+        isImage = true; // Treat documents as images for processing
+        mediaUrl = document?.id;
+        userMessage = document?.caption || "[Document received]";
+        break;
+
+      default:
+        structuredLogger.info("Unsupported message type", {
+          type,
+          messageId: id,
+        });
+        return;
+    }
+
+    // Format phone number for compatibility with existing system
+    // For database lookup, use the number as received (without prefixes)
+    // For legacy compatibility, also create the whatsapp: format
+    const userPhoneNumber = from; // Use the number as received from WhatsApp
+    const legacyPhoneNumber = `whatsapp:+${from}`; // For legacy compatibility
+
+    structuredLogger.info("Formatted Cloud API message for processing", {
+      messageId: id,
+      userPhoneNumber,
+      messageType: type,
+      hasMedia: !!mediaUrl,
+      messageLength: userMessage.length,
+    });
+
+    // Handle audio messages with AudioMessageHandler
+    if (type === "audio") {
+      await processAudioMessageWithHandler(mediaUrl, userPhoneNumber, id);
+      return;
+    }
+
+    // Create a mock request object compatible with existing processing logic
+    const mockReq = {
+      body: {
+        From: userPhoneNumber,
+        Body: userMessage,
+        MediaUrl0: mediaUrl, // This will be the media ID for Cloud API
+        MediaContentType0: isImage
+          ? "image/jpeg"
+          : type === "audio"
+          ? "audio/ogg"
+          : "application/octet-stream",
+      },
+      cloudApiMessage: {
+        id,
+        type,
+        timestamp,
+        originalMessage: message,
+      },
+    };
+
+    // Process the message using existing logic
+    await processMessageWithExistingLogic(
+      mockReq,
+      isImage,
+      userMessage,
+      userPhoneNumber,
+      id
+    );
+  } catch (error) {
+    structuredLogger.error("Error processing single Cloud API message", {
+      error: error.message,
+      messageId: message?.id,
+      from: message?.from,
+    });
+  }
+}
 
 /**
  * GET endpoint for WhatsApp Cloud API webhook verification
@@ -219,7 +351,7 @@ router.post("/", async (req, res) => {
   }
 
   // If we reach here, it's not a Cloud API request
-  res.status(400).json({ error: 'Invalid webhook request format' });
+  res.status(400).json({ error: "Invalid webhook request format" });
 });
 
 /**
@@ -227,15 +359,15 @@ router.post("/", async (req, res) => {
  */
 async function handleCloudApiWebhook(req, res) {
   try {
-    structuredLogger.info('Cloud API webhook received', {
+    structuredLogger.info("Cloud API webhook received", {
       body: JSON.stringify(req.body, null, 2),
       headers: {
-        'X-Hub-Signature-256': req.get('X-Hub-Signature-256'),
-        'Content-Type': req.get('Content-Type')
-      }
+        "X-Hub-Signature-256": req.get("X-Hub-Signature-256"),
+        "Content-Type": req.get("Content-Type"),
+      },
     });
-    
-    console.log('🔍 WEBHOOK DEBUG - Payload completo:');
+
+    console.log("🔍 WEBHOOK DEBUG - Payload completo:");
     console.log(JSON.stringify(req.body, null, 2));
 
     // Temporarily skip signature verification for debugging
@@ -249,20 +381,20 @@ async function handleCloudApiWebhook(req, res) {
 
     // Process webhook payload
     const { entry } = req.body;
-    
+
     if (!entry || !Array.isArray(entry)) {
-      return res.status(400).json({ error: 'Invalid webhook payload' });
+      return res.status(400).json({ error: "Invalid webhook payload" });
     }
 
     // Process each entry
     for (const entryItem of entry) {
       if (entryItem.changes) {
         for (const change of entryItem.changes) {
-          if (change.field === 'messages' && change.value.messages) {
+          if (change.field === "messages" && change.value.messages) {
             for (const message of change.value.messages) {
               await processSingleCloudApiMessage(
-                message, 
-                change.value.contacts, 
+                message,
+                change.value.contacts,
                 change.value.metadata
               );
             }
@@ -273,11 +405,11 @@ async function handleCloudApiWebhook(req, res) {
 
     return res.status(200).json({ success: true });
   } catch (error) {
-    structuredLogger.error('Error processing Cloud API webhook', {
+    structuredLogger.error("Error processing Cloud API webhook", {
       error: error.message,
-      stack: error.stack
+      stack: error.stack,
     });
-    return res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: "Internal server error" });
   }
 }
 
@@ -298,11 +430,11 @@ async function processMessageWithExistingLogic(
       return; // Skip empty messages
     }
 
-    console.log('🔍 PROCESS DEBUG - Iniciando processamento:');
-    console.log('UserPhoneNumber:', userPhoneNumber);
-    console.log('UserMessage:', userMessage);
-    console.log('IsImage:', isImage);
-    
+    console.log("🔍 PROCESS DEBUG - Iniciando processamento:");
+    console.log("UserPhoneNumber:", userPhoneNumber);
+    console.log("UserMessage:", userMessage);
+    console.log("IsImage:", isImage);
+
     devLog(`Mensagem de ${userPhoneNumber} para processar: "${userMessage}"`);
 
     const { authorized, user } = await validateUserAccess(userPhoneNumber);
@@ -323,6 +455,8 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
     devLog(`User DB ID: ${userIdString}`);
 
     const previousData = conversationState[userIdString] || {};
+    devLog(`[ConversationState] User ${userIdString} previous data:`, previousData);
+    
     const userStats = await UserStats.findOne(
       { userId: userObjectId },
       { blocked: 1 }
@@ -386,9 +520,9 @@ Para continuar utilizando a sua assistente financeira e continuar deixando o seu
     structuredLogger.info("Sending collected TwiML messages", {
       messageCount: mockTwiml.messages.length,
       messages: mockTwiml.messages,
-      userPhoneNumber
+      userPhoneNumber,
     });
-    
+
     for (const message of mockTwiml.messages) {
       await sendCloudApiResponse(userPhoneNumber, message);
     }
@@ -412,8 +546,8 @@ async function sendCloudApiResponse(to, message) {
   try {
     structuredLogger.info("sendCloudApiResponse called", {
       to,
-      message: message.substring(0, 100) + (message.length > 100 ? '...' : ''),
-      messageLength: message.length
+      message: message.substring(0, 100) + (message.length > 100 ? "..." : ""),
+      messageLength: message.length,
     });
 
     // Check if Cloud API is enabled
@@ -433,7 +567,7 @@ async function sendCloudApiResponse(to, message) {
     structuredLogger.info("Sending message via Cloud API", {
       originalTo: to,
       formattedPhoneNumber: phoneNumber,
-      messagePreview: message.substring(0, 50) + '...'
+      messagePreview: message.substring(0, 50) + "...",
     });
 
     await cloudApiService.sendTextMessage(phoneNumber, message);
@@ -464,17 +598,24 @@ async function sendCloudApiResponse(to, message) {
 /**
  * Send audio processing feedback message via Cloud API
  */
-async function sendAudioFeedbackMessage(userPhoneNumber, messageType, additionalData = null) {
+async function sendAudioFeedbackMessage(
+  userPhoneNumber,
+  messageType,
+  additionalData = null
+) {
   try {
     let message;
-    
+
     switch (messageType) {
-      case 'PROCESSING':
+      case "PROCESSING":
         message = "🎤 Processando seu áudio... Só um instante.";
         break;
-      case 'SUCCESS':
-        message = additionalData?.transcription 
-          ? `🎤✅ Áudio processado: "${additionalData.transcription.substring(0, 100)}${additionalData.transcription.length > 100 ? '...' : ''}"`
+      case "SUCCESS":
+        message = additionalData?.transcription
+          ? `🎤✅ Áudio processado: "${additionalData.transcription.substring(
+              0,
+              100
+            )}${additionalData.transcription.length > 100 ? "..." : ""}"`
           : "🎤✅ Áudio processado com sucesso!";
         break;
       default:
@@ -486,14 +627,13 @@ async function sendAudioFeedbackMessage(userPhoneNumber, messageType, additional
     structuredLogger.info("Audio feedback message sent", {
       userPhoneNumber,
       messageType,
-      messageLength: message.length
+      messageLength: message.length,
     });
-
   } catch (error) {
     structuredLogger.error("Error sending audio feedback message", {
       error: error.message,
       userPhoneNumber,
-      messageType
+      messageType,
     });
   }
 }
@@ -518,14 +658,17 @@ async function processMessageForCloudApi(
     isImage,
     userPhoneNumber,
     userIdString,
-    previousDataAwaiting: previousData.awaiting
+    previousDataAwaiting: previousData.awaiting,
   });
 
   // This function will contain the adapted message processing logic
   // For now, we'll implement a basic version and expand it
 
   if (isImage) {
-    await sendCloudApiMessage(userPhoneNumber, "🔍 Analisando seu documento... Só um instante.");
+    await sendCloudApiMessage(
+      userPhoneNumber,
+      "🔍 Analisando seu documento... Só um instante."
+    );
 
     try {
       // Handle image processing for Cloud API
@@ -544,10 +687,14 @@ async function processMessageForCloudApi(
       structuredLogger.error("Error processing Cloud API image", {
         error: error.message,
       });
-      await sendErrorMessageWithFallback(userPhoneNumber, "❌ Erro ao processar imagem. Tente novamente.", {
-        errorType: "IMAGE_PROCESSING_ERROR",
-        error: error.message
-      });
+      await sendErrorMessageWithFallback(
+        userPhoneNumber,
+        "❌ Erro ao processar imagem. Tente novamente.",
+        {
+          errorType: "IMAGE_PROCESSING_ERROR",
+          error: error.message,
+        }
+      );
     }
     return;
   }
@@ -556,7 +703,10 @@ async function processMessageForCloudApi(
   if (previousData.awaiting === "payment_status_confirmation") {
     const userInput = userMessage.trim().toLowerCase();
     if (userInput !== "sim" && userInput !== "não") {
-      await sendCloudApiMessage(userPhoneNumber, "Por favor, responda apenas com `sim` ou `não`.");
+      await sendCloudApiMessage(
+        userPhoneNumber,
+        "Por favor, responda apenas com `sim` ou `não`."
+      );
     } else {
       // Process payment confirmation logic...
       const hasPaid = userInput === "sim";
@@ -602,12 +752,14 @@ async function processMessageForCloudApi(
         });
         await newReminder.save();
         // Send response via Cloud API
-        await sendCloudApiMessage(userPhoneNumber, 
+        await sendCloudApiMessage(
+          userPhoneNumber,
           `✅ Conta da *${provider}* registrada como *pendente* e lembrete criado para o dia do vencimento!`
         );
       } else {
         // Send response via Cloud API
-        await sendCloudApiMessage(userPhoneNumber,
+        await sendCloudApiMessage(
+          userPhoneNumber,
           `✅ Conta da *${provider}* registrada como *paga* com sucesso!`
         );
       }
@@ -616,19 +768,300 @@ async function processMessageForCloudApi(
     return;
   }
 
+  // Handle early reminder prompt
+  if (previousData.awaiting === "early_reminder_prompt") {
+    try {
+      devLog(`[EarlyReminder] Processing early reminder for user ${userIdString}, payload:`, previousData.payload);
+      
+      const interpretation = await interpretMessageWithAI(
+        userMessage,
+        getCurrentDateInBrazil().toISOString()
+      );
+
+      devLog(`[EarlyReminder] AI interpretation:`, interpretation);
+
+      if (interpretation.intent === "set_early_reminder") {
+        const { value, unit } = interpretation.data;
+        const { reminderId } = previousData.payload;
+
+        devLog(`[EarlyReminder] Looking for reminder with ID: ${reminderId}`);
+        
+        const reminder = await Reminder.findById(reminderId);
+        if (!reminder) {
+          devLog(`[EarlyReminder] Reminder not found with ID: ${reminderId}`);
+          await sendCloudApiResponse(
+            userPhoneNumber,
+            "Ops, não encontrei o lembrete original. Tente criar um novo."
+          );
+          delete conversationState[userIdString];
+        } else {
+          devLog(`[EarlyReminder] Reminder found:`, reminder);
+          
+          try {
+            // Convert stored UTC date to Brazil timezone for processing
+            const mainReminderBrazil = convertFromUTCForProcessing(reminder.date);
+            
+            // Calculate early reminder minutes
+            let earlyMinutes;
+            if (unit.includes("minuto")) {
+              earlyMinutes = value;
+            } else if (unit.includes("hora")) {
+              earlyMinutes = value * 60;
+            } else {
+              throw new Error("Unidade de tempo não reconhecida");
+            }
+
+            // Validate early reminder time with 5-minute buffer
+            const validation = validateEarlyReminderTime(mainReminderBrazil, earlyMinutes, 5);
+            
+            if (!validation.isValid) {
+              await sendCloudApiResponse(
+                userPhoneNumber,
+                validation.errorMessage
+              );
+              devLog(`[EarlyReminder] Validation failed: ${validation.errorMessage}`);
+            } else {
+              // Calculate early reminder date in Brazil timezone
+              const earlyReminderBrazil = new Date(mainReminderBrazil);
+              if (unit.includes("minuto")) {
+                earlyReminderBrazil.setMinutes(earlyReminderBrazil.getMinutes() - value);
+              } else if (unit.includes("hora")) {
+                earlyReminderBrazil.setHours(earlyReminderBrazil.getHours() - value);
+              }
+              
+              // Convert to UTC for storage
+              const earlyReminderUTC = convertToUTCForStorage(earlyReminderBrazil);
+              
+              await Reminder.updateOne(
+                { _id: reminder._id },
+                { $set: { earlyReminderDate: earlyReminderUTC } }
+              );
+              
+              await sendCloudApiResponse(
+                userPhoneNumber,
+                `✅ Confirmado! Irei te lembrar ${value} ${unit} antes.`
+              );
+              
+              devLog(`[EarlyReminder] Early reminder set for ${formatDateTimeInBrazil(earlyReminderBrazil)} (Brazil time), stored as ${earlyReminderUTC.toISOString()} (UTC)`);
+              delete conversationState[userIdString];
+            }
+          } catch (error) {
+            devLog(`[EarlyReminder] Error processing early reminder: ${error.message}`);
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              "Ops, houve um erro ao processar o lembrete antecipado. O lembrete principal está mantido. 😉"
+            );
+            delete conversationState[userIdString];
+          }
+        }
+      } else {
+        await sendCloudApiResponse(
+          userPhoneNumber,
+          "Ok, sem problemas! O lembrete principal está mantido. 😉"
+        );
+        delete conversationState[userIdString];
+      }
+    } catch (err) {
+      devLog("Erro ao processar lembrete antecipado:", err);
+      await sendCloudApiResponse(
+        userPhoneNumber,
+        "Ok, sem problemas! O lembrete principal está mantido. 😉"
+      );
+      delete conversationState[userIdString];
+    }
+    return;
+  }
+
+  // Handle inventory fields definition
+  if (previousData.awaiting === "inventory_fields") {
+    const { templateName } = previousData;
+    const fieldsInput = userMessage.trim();
+    
+    // Parse campos separados por vírgula
+    const fields = fieldsInput.split(',')
+      .map(field => field.trim().toLowerCase())
+      .filter(field => field.length > 0);
+
+    // Validar número de campos
+    if (fields.length < 2 || fields.length > 10) {
+      await sendCloudApiResponse(
+        userPhoneNumber,
+        "🚫 Por favor, envie entre 2 e 10 campos separados por vírgula.\n\n" +
+        "Exemplo: nome, cor, tamanho, preço"
+      );
+      return;
+    }
+
+    // Capitalizar primeira letra de cada campo
+    const capitalizedFields = fields.map(field => 
+      field.charAt(0).toUpperCase() + field.slice(1)
+    );
+
+    // Mostrar confirmação
+    await sendCloudApiResponse(
+      userPhoneNumber,
+      `Ok! Os campos para o estoque *${templateName}* serão:\n` +
+      `${capitalizedFields.join(', ')}.\n\n` +
+      `Está correto? Responda *sim* para salvar.`
+    );
+
+    // Atualizar estado da conversa
+    conversationState[userIdString] = {
+      awaiting: "inventory_confirmation",
+      templateName: templateName,
+      fields: fields
+    };
+
+    return;
+  }
+
+  // Handle inventory confirmation
+  if (previousData.awaiting === "inventory_confirmation") {
+    const { templateName, fields } = previousData;
+    const userInput = userMessage.trim().toLowerCase();
+
+    if (userInput === "sim" || userInput === "s") {
+      try {
+        // Criar o template no banco
+        const newTemplate = new InventoryTemplate({
+          userId: userIdString,
+          templateName: templateName,
+          fields: fields
+        });
+
+        await newTemplate.save();
+
+        await sendCloudApiResponse(
+          userPhoneNumber,
+          `✅ Estoque para *${templateName}* criado com sucesso!\n\n` +
+          `Para adicionar seu primeiro item, diga: "adicionar ${templateName}"`
+        );
+
+        delete conversationState[userIdString];
+      } catch (error) {
+        console.error('Erro ao criar template de estoque:', error);
+        await sendCloudApiResponse(
+          userPhoneNumber,
+          "Erro interno ao criar o estoque. Tente novamente."
+        );
+        delete conversationState[userIdString];
+      }
+    } else {
+      await sendCloudApiResponse(
+        userPhoneNumber,
+        "Ok! Vamos tentar novamente.\n\n" +
+        "Quais informações você quer salvar para cada item?\n" +
+        "Envie os nomes dos campos separados por vírgula.\n\n" +
+        "Exemplo: nome, cor, tamanho, preço"
+      );
+
+      // Voltar ao estado anterior
+      conversationState[userIdString] = {
+        awaiting: "inventory_fields",
+        templateName: templateName
+      };
+    }
+
+    return;
+  }
+
+  // Handle product attributes input
+  if (previousData.awaiting === "product_attributes") {
+    const { templateId, templateName, fields } = previousData;
+    const attributesInput = userMessage.trim();
+    
+    // Parse valores separados por vírgula
+    const values = attributesInput.split(',')
+      .map(value => value.trim())
+      .filter(value => value.length > 0);
+
+    // Validar número de valores
+    if (values.length !== fields.length) {
+      await sendCloudApiResponse(
+        userPhoneNumber,
+        `🚫 Por favor, envie exatamente ${fields.length} valores separados por vírgula.\n\n` +
+        `Campos esperados: *${fields.join(', ')}*`
+      );
+      return;
+    }
+
+    try {
+      // Importar o modelo Product
+      const Product = (await import("../models/Product.js")).default;
+      
+      // Gerar ID customizado único
+      const generateProductId = customAlphabet("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 5);
+      let customId;
+      let attempts = 0;
+      
+      do {
+        customId = `P${generateProductId()}`;
+        const existingProduct = await Product.findOne({ userId: userIdString, customId });
+        if (!existingProduct) break;
+        attempts++;
+      } while (attempts < 10);
+
+      if (attempts >= 10) {
+        throw new Error("Não foi possível gerar um ID único para o produto");
+      }
+
+      // Criar mapa de atributos
+      const attributes = new Map();
+      fields.forEach((field, index) => {
+        attributes.set(field, values[index]);
+      });
+
+      // Criar produto
+      const newProduct = new Product({
+        userId: userIdString,
+        templateId: templateId,
+        customId: customId,
+        attributes: attributes,
+        quantity: 0
+      });
+
+      await newProduct.save();
+
+      // Criar mensagem de confirmação
+      let confirmationMessage = `✅ Produto *${values[0]}* (ID: #${customId}) adicionado ao estoque *${templateName}* com quantidade 0.\n\n`;
+      
+      fields.forEach((field, index) => {
+        confirmationMessage += `*${field.charAt(0).toUpperCase() + field.slice(1)}:* ${values[index]}\n`;
+      });
+      
+      confirmationMessage += `\nPara dar entrada, diga: "entrada 10 #${customId}"`;
+
+      await sendCloudApiResponse(userPhoneNumber, confirmationMessage);
+
+      delete conversationState[userIdString];
+    } catch (error) {
+      console.error('Erro ao criar produto:', error);
+      await sendCloudApiResponse(
+        userPhoneNumber,
+        "❌ Erro interno ao criar o produto. Tente novamente."
+      );
+      delete conversationState[userIdString];
+    }
+
+    return;
+  }
+
   // Handle PIX type confirmation
   if (previousData.awaiting === "pix_type_confirmation") {
     const userInput = userMessage.trim().toLowerCase();
     if (userInput !== "fiz" && userInput !== "recebi") {
-      await sendCloudApiMessage(userPhoneNumber, "Por favor, responda apenas com `fiz` ou `recebi`.");
+      await sendCloudApiMessage(
+        userPhoneNumber,
+        "Por favor, responda apenas com `fiz` ou `recebi`."
+      );
     } else {
       // Process PIX confirmation logic...
       const isExpense = userInput === "fiz"; // "fiz" = expense, "recebi" = income
       const { totalAmount, counterpartName } = previousData.payload;
 
       const transactionType = isExpense ? "expense" : "income";
-      const description = isExpense 
-        ? `PIX para ${counterpartName}` 
+      const description = isExpense
+        ? `PIX para ${counterpartName}`
         : `PIX recebido de ${counterpartName}`;
 
       // Get or create appropriate category
@@ -664,17 +1097,21 @@ async function processMessageForCloudApi(
 
       // Send confirmation message
       const confirmationMessage = isExpense
-        ? `✅ PIX de *R$ ${totalAmount.toFixed(2)}* para *${counterpartName}* registrado como despesa!`
-        : `✅ PIX de *R$ ${totalAmount.toFixed(2)}* de *${counterpartName}* registrado como receita!`;
-      
+        ? `✅ PIX de *R$ ${totalAmount.toFixed(
+            2
+          )}* para *${counterpartName}* registrado como despesa!`
+        : `✅ PIX de *R$ ${totalAmount.toFixed(
+            2
+          )}* de *${counterpartName}* registrado como receita!`;
+
       await sendCloudApiMessage(userPhoneNumber, confirmationMessage);
-      
+
       structuredLogger.info("PIX transaction processed successfully", {
         userPhoneNumber,
         transactionType,
         totalAmount,
         counterpartName,
-        transactionId: newTransaction._id.toString()
+        transactionId: newTransaction._id.toString(),
       });
 
       delete conversationState[userIdString];
@@ -687,17 +1124,19 @@ async function processMessageForCloudApi(
     userMessage,
     userIdString,
     previousDataAwaiting: previousData.awaiting,
-    hasConversationState: !!conversationState[userIdString]
+    hasConversationState: !!conversationState[userIdString],
   });
 
   // Special handling for "apagar item X" when user has list deletion available
-  if (userMessage.toLowerCase().trim().startsWith("apagar item") && 
-      previousData.awaiting === "list_item_deletion_available") {
-    
+  if (
+    userMessage.toLowerCase().trim().startsWith("apagar item") &&
+    previousData.awaiting === "list_item_deletion_available"
+  ) {
     // Extract item number from message
     const match = userMessage.match(/apagar item (\d+)/i);
     if (!match) {
-      await sendCloudApiResponse(userPhoneNumber,
+      await sendCloudApiResponse(
+        userPhoneNumber,
         "🚫 Formato inválido. Use 'apagar item X' onde X é o número do item."
       );
       return;
@@ -705,9 +1144,10 @@ async function processMessageForCloudApi(
 
     const itemNumber = parseInt(match[1]);
     const { transactionIds, type } = previousData.payload;
-    
+
     if (itemNumber < 1 || itemNumber > transactionIds.length) {
-      await sendCloudApiResponse(userPhoneNumber,
+      await sendCloudApiResponse(
+        userPhoneNumber,
         `🚫 Número do item inválido. Escolha um número entre 1 e ${transactionIds.length}.`
       );
       return;
@@ -715,7 +1155,7 @@ async function processMessageForCloudApi(
 
     // Get the transaction ID (itemNumber is 1-based, array is 0-based)
     const transactionId = transactionIds[itemNumber - 1];
-    
+
     const transaction = await Transaction.findOneAndDelete({
       _id: transactionId,
       userId: userIdString,
@@ -728,23 +1168,30 @@ async function processMessageForCloudApi(
           { userId: userObjectId },
           { $inc: { totalSpent: -transaction.amount } }
         );
-        await sendCloudApiResponse(userPhoneNumber,
-          `🗑️ Item ${itemNumber} removido: ${transaction.description} - R$ ${transaction.amount.toFixed(2)}`
+        await sendCloudApiResponse(
+          userPhoneNumber,
+          `🗑️ Item ${itemNumber} removido: ${
+            transaction.description
+          } - R$ ${transaction.amount.toFixed(2)}`
         );
       } else {
         await UserStats.findOneAndUpdate(
           { userId: userObjectId },
           { $inc: { totalIncome: -transaction.amount } }
         );
-        await sendCloudApiResponse(userPhoneNumber,
-          `🗑️ Item ${itemNumber} removido: ${transaction.description} - R$ ${transaction.amount.toFixed(2)}`
+        await sendCloudApiResponse(
+          userPhoneNumber,
+          `🗑️ Item ${itemNumber} removido: ${
+            transaction.description
+          } - R$ ${transaction.amount.toFixed(2)}`
         );
       }
-      
+
       // Clear conversation state after deletion
       delete conversationState[userIdString];
     } else {
-      await sendCloudApiResponse(userPhoneNumber,
+      await sendCloudApiResponse(
+        userPhoneNumber,
         "🚫 Erro ao remover o item. Tente novamente."
       );
     }
@@ -752,89 +1199,113 @@ async function processMessageForCloudApi(
   }
 
   // Special handling for "detalhes" when user has expense/income details available
-  if (userMessage.toLowerCase().trim() === "detalhes" && 
-      (previousData.awaiting === "expense_details_available" || previousData.awaiting === "income_details_available")) {
-    
+  if (
+    userMessage.toLowerCase().trim() === "detalhes" &&
+    (previousData.awaiting === "expense_details_available" ||
+      previousData.awaiting === "income_details_available")
+  ) {
     structuredLogger.info("Processing detalhes request", {
       awaiting: previousData.awaiting,
-      payload: previousData.payload
+      payload: previousData.payload,
     });
-    
+
     if (previousData.awaiting === "expense_details_available") {
       const { month, monthName, category } = previousData.payload;
-      const details = await getExpenseDetails(userIdString, month, monthName, category);
-      
+      const details = await getExpenseDetails(
+        userIdString,
+        month,
+        monthName,
+        category
+      );
+
       structuredLogger.info("Expense details retrieved", {
         messageCount: details.messages.length,
-        transactionCount: details.transactionIds.length
+        transactionCount: details.transactionIds.length,
       });
-      
+
       // Send each message chunk
       for (const message of details.messages) {
         await sendCloudApiResponse(userPhoneNumber, message);
       }
-      
+
       // Save transaction IDs for potential deletion
       conversationState[userIdString] = {
         awaiting: "list_item_deletion_available",
-        payload: { 
+        payload: {
           transactionIds: details.transactionIds,
-          type: "expense"
-        }
+          type: "expense",
+        },
       };
-      
     } else if (previousData.awaiting === "income_details_available") {
       const { month, monthName, category } = previousData.payload;
-      const details = await getIncomeDetails(userIdString, month, monthName, category);
-      
+      const details = await getIncomeDetails(
+        userIdString,
+        month,
+        monthName,
+        category
+      );
+
       structuredLogger.info("Income details retrieved", {
         messageCount: details.messages.length,
-        transactionCount: details.transactionIds.length
+        transactionCount: details.transactionIds.length,
       });
-      
+
       // Send each message chunk
       for (const message of details.messages) {
         await sendCloudApiResponse(userPhoneNumber, message);
       }
-      
+
       // Save transaction IDs for potential deletion
       conversationState[userIdString] = {
         awaiting: "list_item_deletion_available",
-        payload: { 
+        payload: {
           transactionIds: details.transactionIds,
-          type: "income"
-        }
+          type: "income",
+        },
       };
     }
     return;
   }
 
   // Process normal messages (either no conversation state, or conversation state that allows normal processing)
-  const shouldProcessNormally = !previousData.awaiting || 
-    (previousData.awaiting === "list_item_deletion_available" && !userMessage.toLowerCase().trim().startsWith("apagar item")) ||
-    (previousData.awaiting === "expense_details_available" && userMessage.toLowerCase().trim() !== "detalhes") ||
-    (previousData.awaiting === "income_details_available" && userMessage.toLowerCase().trim() !== "detalhes");
-    
-  if (shouldProcessNormally) {
-    
+  const shouldProcessNormally =
+    !previousData.awaiting ||
+    (previousData.awaiting === "list_item_deletion_available" &&
+      !userMessage.toLowerCase().trim().startsWith("apagar item")) ||
+    (previousData.awaiting === "expense_details_available" &&
+      userMessage.toLowerCase().trim() !== "detalhes") ||
+    (previousData.awaiting === "income_details_available" &&
+      userMessage.toLowerCase().trim() !== "detalhes");
+
+  // Não processar normalmente se estiver em fluxo de criação de estoque
+  const isInventoryFlow = previousData.awaiting === "inventory_fields" || 
+                         previousData.awaiting === "inventory_confirmation" ||
+                         previousData.awaiting === "product_attributes";
+
+  if (shouldProcessNormally && !isInventoryFlow) {
     // If user sends a different message while in a conversation state, clear the state
-    if (previousData.awaiting && 
-        ((previousData.awaiting === "list_item_deletion_available" && !userMessage.toLowerCase().trim().startsWith("apagar item")) ||
-         (previousData.awaiting === "expense_details_available" && userMessage.toLowerCase().trim() !== "detalhes") ||
-         (previousData.awaiting === "income_details_available" && userMessage.toLowerCase().trim() !== "detalhes"))) {
+    if (
+      previousData.awaiting &&
+      ((previousData.awaiting === "list_item_deletion_available" &&
+        !userMessage.toLowerCase().trim().startsWith("apagar item")) ||
+        (previousData.awaiting === "expense_details_available" &&
+          userMessage.toLowerCase().trim() !== "detalhes") ||
+        (previousData.awaiting === "income_details_available" &&
+          userMessage.toLowerCase().trim() !== "detalhes"))
+    ) {
       delete conversationState[userIdString];
     }
     try {
       structuredLogger.info("Calling interpretMessageWithAI", { userMessage });
-      
+
       const interpretation = await interpretMessageWithAI(
         userMessage,
-        new Date().toISOString()
+        getCurrentDateInBrazil().toISOString()
       );
-      
-      structuredLogger.info("AI interpretation result", { 
+
+      structuredLogger.info("AI interpretation result", {
         intent: interpretation.intent,
-        data: interpretation.data 
+        data: interpretation.data,
       });
       const userHasFreeCategorization = await hasAccessToFeature(
         userObjectId,
@@ -854,7 +1325,8 @@ async function processMessageForCloudApi(
 
           if (amount === null || isNaN(amount) || amount <= 0) {
             // Send error message via Cloud API
-            await sendCloudApiMessage(userPhoneNumber,
+            await sendCloudApiMessage(
+              userPhoneNumber,
               "🚫 Não consegui identificar um valor válido para a receita. Por favor, tente novamente com um número positivo. Ex: 'Recebi 1000 salário'."
             );
             break;
@@ -906,7 +1378,8 @@ async function processMessageForCloudApi(
 
           if (amount === null || isNaN(amount) || amount <= 0) {
             // Send error message via Cloud API
-            await sendCloudApiMessage(userPhoneNumber,
+            await sendCloudApiMessage(
+              userPhoneNumber,
               "🚫 Não consegui identificar um valor válido para a despesa. Por favor, tente novamente com um número positivo. Ex: '15 uber'."
             );
             break;
@@ -955,107 +1428,221 @@ async function processMessageForCloudApi(
 
         case "get_total": {
           let { month, monthName, category } = interpretation.data;
-          
+
           // If no month specified, use current month
           if (!month) {
             const now = new Date();
             const year = now.getFullYear();
             const monthNumber = now.getMonth() + 1; // getMonth() returns 0-11
-            month = `${year}-${monthNumber.toString().padStart(2, '0')}`;
-            
+            month = `${year}-${monthNumber.toString().padStart(2, "0")}`;
+
             // Set monthName to current month in Portuguese
             const monthNames = [
-              'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-              'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+              "Janeiro",
+              "Fevereiro",
+              "Março",
+              "Abril",
+              "Maio",
+              "Junho",
+              "Julho",
+              "Agosto",
+              "Setembro",
+              "Outubro",
+              "Novembro",
+              "Dezembro",
             ];
             monthName = monthNames[now.getMonth()];
           }
-          
-          const total = await calculateTotalExpenses(userIdString, category, month);
+
+          const total = await calculateTotalExpenses(
+            userIdString,
+            category,
+            month
+          );
           sendTotalExpenseMessage(twiml, total, monthName, category);
-          
+
           // Save conversation state for potential "detalhes" request
           conversationState[userIdString] = {
             awaiting: "expense_details_available",
-            payload: { month, monthName, category }
+            payload: { month, monthName, category },
           };
           break;
         }
 
         case "get_total_income": {
           let { month, monthName, category } = interpretation.data;
-          
+
           // If no month specified, use current month
           if (!month) {
             const now = new Date();
             const year = now.getFullYear();
             const monthNumber = now.getMonth() + 1; // getMonth() returns 0-11
-            month = `${year}-${monthNumber.toString().padStart(2, '0')}`;
-            
+            month = `${year}-${monthNumber.toString().padStart(2, "0")}`;
+
             // Set monthName to current month in Portuguese
             const monthNames = [
-              'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-              'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+              "Janeiro",
+              "Fevereiro",
+              "Março",
+              "Abril",
+              "Maio",
+              "Junho",
+              "Julho",
+              "Agosto",
+              "Setembro",
+              "Outubro",
+              "Novembro",
+              "Dezembro",
             ];
             monthName = monthNames[now.getMonth()];
           }
-          
-          const total = await calculateTotalIncome(userIdString, month, category);
+
+          const total = await calculateTotalIncome(
+            userIdString,
+            month,
+            category
+          );
           sendTotalIncomeMessage(twiml, total, monthName);
-          
+
           // Save conversation state for potential "detalhes" request
           conversationState[userIdString] = {
             awaiting: "income_details_available",
-            payload: { month, monthName, category }
+            payload: { month, monthName, category },
           };
           break;
         }
 
-
-
         case "reminder": {
           const { description, date } = interpretation.data;
-          
+          const reminderCorrelationId = generateReminderCorrelationId(userIdString, 'create');
+
           if (!description || !date) {
-            await sendCloudApiResponse(userPhoneNumber,
+            structuredLogger.reminderOperation('create_failed', {
+              userId: userIdString,
+              error: 'Missing description or date',
+              correlationId: reminderCorrelationId
+            });
+            await sendCloudApiResponse(
+              userPhoneNumber,
               "🚫 Não consegui identificar a descrição ou data do lembrete. Por favor, tente novamente. Ex: 'me lembre de pagar o aluguel dia 5'."
             );
             break;
           }
 
-          const reminderDate = new Date(date);
-          const newReminder = new Reminder({
-            userId: userObjectId,
-            userPhoneNumber: userPhoneNumber,
-            description,
-            date: reminderDate,
-            messageId: generateId(),
-          });
+          try {
+            // Log timezone operation start
+            structuredLogger.timezoneOperation('parse_reminder_date', {
+              originalDate: date,
+              correlationId: reminderCorrelationId
+            });
 
-          await newReminder.save();
-          
-          // Create a mock twiml to capture the message
-          const mockTwiml = { messages: [] };
-          mockTwiml.message = (text) => mockTwiml.messages.push(text);
-          
-          await sendReminderMessage(mockTwiml, description, newReminder);
-          
-          // Send the captured message via Cloud API
-          for (const message of mockTwiml.messages) {
-            await sendCloudApiResponse(userPhoneNumber, message);
+            // Parse the date using Brazil timezone utilities
+            const reminderDateBrazil = createReminderDate(date);
+            
+            // Validate that the reminder is not in the past
+            const currentBrazilDate = getCurrentDateInBrazil();
+            if (reminderDateBrazil <= currentBrazilDate) {
+              structuredLogger.reminderOperation('create_failed', {
+                userId: userIdString,
+                reminderDate: reminderDateBrazil,
+                currentDate: currentBrazilDate,
+                error: 'Reminder date is in the past',
+                correlationId: reminderCorrelationId
+              });
+              await sendCloudApiResponse(
+                userPhoneNumber,
+                `🚫 Não é possível criar um lembrete no passado. O horário especificado (${formatDateTimeInBrazil(reminderDateBrazil)}) já passou. Horário atual: ${formatDateTimeInBrazil(currentBrazilDate)}.`
+              );
+              break;
+            }
+            
+            const reminderDateUTC = convertToUTCForStorage(reminderDateBrazil);
+            
+            const newReminder = new Reminder({
+              userId: userObjectId,
+              userPhoneNumber: userPhoneNumber,
+              description,
+              date: reminderDateUTC,
+              messageId: generateId(),
+            });
+
+            await newReminder.save();
+            
+            // Log successful reminder creation with audit trail
+            structuredLogger.reminderOperation('create_success', {
+              userId: userIdString,
+              description,
+              reminderDate: reminderDateBrazil,
+              currentDate: currentBrazilDate,
+              correlationId: reminderCorrelationId
+            });
+
+            structuredLogger.auditLog('reminder_created', {
+              userId: userIdString,
+              reminderId: newReminder._id.toString(),
+              description,
+              reminderDateUTC: reminderDateUTC.toISOString(),
+              reminderDateBrazil: formatDateTimeInBrazil(reminderDateBrazil),
+              correlationId: reminderCorrelationId
+            });
+            
+            // Log with timezone information
+            devLog(`[Reminder] Created reminder for ${formatDateTimeInBrazil(reminderDateBrazil)} (Brazil time), stored as ${reminderDateUTC.toISOString()} (UTC)`);
+
+            // Create a mock twiml to capture the message
+            const mockTwiml = { messages: [] };
+            mockTwiml.message = (text) => mockTwiml.messages.push(text);
+
+            const originalMessage = await sendReminderMessage(
+              mockTwiml,
+              description,
+              newReminder
+            );
+
+            // Send the captured message via Cloud API
+            for (const message of mockTwiml.messages) {
+              await sendCloudApiResponse(userPhoneNumber, message);
+            }
+
+            // Set conversation state for early reminder prompt
+            conversationState[userIdString] = {
+              awaiting: "early_reminder_prompt",
+              payload: { reminderId: newReminder._id.toString() },
+              reminderDate: formatDateTimeInBrazil(reminderDateBrazil),
+              correlationId: reminderCorrelationId
+            };
+
+          } catch (error) {
+            structuredLogger.reminderOperation('create_failed', {
+              userId: userIdString,
+              error: error.message,
+              originalDate: date,
+              correlationId: reminderCorrelationId
+            });
+            devLog(`[Reminder] Error creating reminder date: ${error.message}`);
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              `🚫 Erro ao processar a data do lembrete: ${error.message}`
+            );
+            break;
           }
+
+          // Ask about early reminder
+          const earlyReminderMessage = `\n\n*Gostaria de ser lembrado minutos ou horas antes do seu compromisso?*`;
+          await sendCloudApiResponse(userPhoneNumber, earlyReminderMessage);
+
           break;
         }
 
         case "get_total_reminders": {
           const reminders = await getTotalReminders(userObjectId);
-          
+
           // Create a mock twiml to capture the message
           const mockTwiml = { messages: [] };
           mockTwiml.message = (text) => mockTwiml.messages.push(text);
-          
+
           sendTotalRemindersMessage(mockTwiml, reminders);
-          
+
           // Send the captured message via Cloud API
           for (const message of mockTwiml.messages) {
             await sendCloudApiResponse(userPhoneNumber, message);
@@ -1065,9 +1652,10 @@ async function processMessageForCloudApi(
 
         case "delete_reminder": {
           const { messageId } = interpretation.data;
-          
+
           if (!messageId) {
-            await sendCloudApiResponse(userPhoneNumber,
+            await sendCloudApiResponse(
+              userPhoneNumber,
               "🚫 Não consegui identificar qual lembrete você quer excluir. Use o código do lembrete, ex: 'apagar lembrete #abc123'."
             );
             break;
@@ -1082,38 +1670,64 @@ async function processMessageForCloudApi(
             // Create a mock twiml to capture the message
             const mockTwiml = { messages: [] };
             mockTwiml.message = (text) => mockTwiml.messages.push(text);
-            
+
             sendReminderDeletedMessage(mockTwiml, reminder);
-            
+
             // Send the captured message via Cloud API
             for (const message of mockTwiml.messages) {
               await sendCloudApiResponse(userPhoneNumber, message);
             }
           } else {
-            await sendCloudApiResponse(userPhoneNumber,
+            await sendCloudApiResponse(
+              userPhoneNumber,
               "🚫 Lembrete não encontrado. Verifique o código e tente novamente."
             );
           }
           break;
         }
 
-        case "add_installment_expense": {
-          const { totalAmount, description, installments, category } = interpretation.data;
+        case "set_early_reminder": {
+          // This case is handled in the early_reminder_prompt state above
+          // If we reach here, it means the user sent an early reminder command outside of the prompt
+          await sendCloudApiResponse(
+            userPhoneNumber,
+            "Para definir um lembrete antecipado, primeiro crie um lembrete normal. Ex: 'me lembre de reunião às 15h'"
+          );
+          break;
+        }
 
-          if (!totalAmount || !installments || totalAmount <= 0 || installments <= 0) {
-            await sendCloudApiResponse(userPhoneNumber,
+        case "add_installment_expense": {
+          const { totalAmount, description, installments, category } =
+            interpretation.data;
+
+          if (
+            !totalAmount ||
+            !installments ||
+            totalAmount <= 0 ||
+            installments <= 0
+          ) {
+            await sendCloudApiResponse(
+              userPhoneNumber,
               "🚫 Não consegui identificar o valor total ou número de parcelas. Ex: '3500 PS5 em 10x'."
             );
             break;
           }
 
           let finalCategoryName = category || "outro";
-          if (!VALID_CATEGORIES.includes(finalCategoryName) && !userHasFreeCategorization) {
+          if (
+            !VALID_CATEGORIES.includes(finalCategoryName) &&
+            !userHasFreeCategorization
+          ) {
             finalCategoryName = "outro";
           }
 
-          const categoryDoc = await getOrCreateCategory(userIdString, finalCategoryName);
-          const defaultPaymentMethod = await PaymentMethod.findOne({ type: "pix" });
+          const categoryDoc = await getOrCreateCategory(
+            userIdString,
+            finalCategoryName
+          );
+          const defaultPaymentMethod = await PaymentMethod.findOne({
+            type: "pix",
+          });
           const installmentGroupId = generateGroupId();
           const installmentAmount = totalAmount / installments;
 
@@ -1146,44 +1760,57 @@ async function processMessageForCloudApi(
             { upsert: true }
           );
 
-          await sendCloudApiResponse(userPhoneNumber,
-            `📝 *Parcelamento criado*\n📌 ${description.toUpperCase()}\n💰 *${installments}x de R$ ${installmentAmount.toFixed(2)}*\n💳 *Total: R$ ${totalAmount.toFixed(2)}*\n\n📅 Primeira parcela já debitada - #${installmentGroupId}`
+          await sendCloudApiResponse(
+            userPhoneNumber,
+            `📝 *Parcelamento criado*\n📌 ${description.toUpperCase()}\n💰 *${installments}x de R$ ${installmentAmount.toFixed(
+              2
+            )}*\n💳 *Total: R$ ${totalAmount.toFixed(
+              2
+            )}*\n\n📅 Primeira parcela já debitada - #${installmentGroupId}`
           );
           break;
         }
 
         case "get_active_installments": {
           const installments = await getActiveInstallments(userIdString);
-          
+
           if (!installments || installments.length === 0) {
-            await sendCloudApiResponse(userPhoneNumber, 
+            await sendCloudApiResponse(
+              userPhoneNumber,
               "📋 Você não possui parcelamentos ativos no momento."
             );
             break;
           }
-          
+
           let message = "💳 *Seus parcelamentos ativos:*\n\n";
-          
+
           installments.forEach((installment, index) => {
-            const totalAmount = installment.installmentAmount * installment.totalInstallments;
-            message += `${index + 1}. **${installment.description.toUpperCase()}**\n`;
-            message += `   💰 ${installment.totalInstallments}x de R$ ${installment.installmentAmount.toFixed(2)}\n`;
+            const totalAmount =
+              installment.installmentAmount * installment.totalInstallments;
+            message += `${
+              index + 1
+            }. **${installment.description.toUpperCase()}**\n`;
+            message += `   💰 ${
+              installment.totalInstallments
+            }x de R$ ${installment.installmentAmount.toFixed(2)}\n`;
             message += `   📊 Total: R$ ${totalAmount.toFixed(2)}\n`;
             message += `   ⏳ Restam: ${installment.pendingCount} parcelas\n`;
             message += `   🆔 ID: #${installment.groupId}\n\n`;
           });
-          
-          message += "Para cancelar um parcelamento, envie: *cancelar parcelamento #ID*";
-          
+
+          message +=
+            "Para cancelar um parcelamento, envie: *cancelar parcelamento #ID*";
+
           await sendCloudApiResponse(userPhoneNumber, message);
           break;
         }
 
         case "delete_transaction": {
           const { messageId } = interpretation.data;
-          
+
           if (!messageId) {
-            await sendCloudApiResponse(userPhoneNumber,
+            await sendCloudApiResponse(
+              userPhoneNumber,
               "🚫 Não consegui identificar qual transação você quer excluir. Use o código da transação, ex: 'remover gasto #abc123'."
             );
             break;
@@ -1210,45 +1837,57 @@ async function processMessageForCloudApi(
               sendIncomeDeletedMessage(twiml, transaction);
             }
           } else {
-            await sendCloudApiResponse(userPhoneNumber,
+            await sendCloudApiResponse(
+              userPhoneNumber,
               "🚫 Transação não encontrada. Verifique o código e tente novamente."
             );
           }
           break;
         }
 
-
-
         case "generate_daily_chart": {
           const { days } = interpretation.data;
           const numDays = days || 7; // Default to 7 days if not specified
-          
+
           try {
             const expenses = await getExpensesReport(userIdString, numDays);
-            
+
             if (!expenses || expenses.length === 0) {
-              await sendCloudApiResponse(userPhoneNumber,
+              await sendCloudApiResponse(
+                userPhoneNumber,
                 `📊 Não há gastos registrados nos últimos ${numDays} dias.`
               );
               break;
             }
-            
-            const imageUrl = await generateChart(expenses, userIdString, numDays);
-            
+
+            const imageUrl = await generateChart(
+              expenses,
+              userIdString,
+              numDays
+            );
+
             // Send image via Cloud API
-            const { CloudApiService } = await import("../services/cloudApiService.js");
+            const { CloudApiService } = await import(
+              "../services/cloudApiService.js"
+            );
             const cloudApiService = new CloudApiService();
-            const phoneNumber = userPhoneNumber.replace("whatsapp:", "").replace("+", "");
-            
-            await cloudApiService.sendMediaMessage(phoneNumber, imageUrl, `📊 Relatório de gastos dos últimos ${numDays} dias`);
-            
+            const phoneNumber = userPhoneNumber
+              .replace("whatsapp:", "")
+              .replace("+", "");
+
+            await cloudApiService.sendMediaMessage(
+              phoneNumber,
+              imageUrl,
+              `📊 Relatório de gastos dos últimos ${numDays} dias`
+            );
           } catch (error) {
             structuredLogger.error("Error generating daily chart", {
               error: error.message,
               userIdString,
-              days: numDays
+              days: numDays,
             });
-            await sendCloudApiResponse(userPhoneNumber,
+            await sendCloudApiResponse(
+              userPhoneNumber,
               "❌ Erro ao gerar o relatório. Tente novamente em alguns instantes."
             );
           }
@@ -1258,33 +1897,45 @@ async function processMessageForCloudApi(
         case "generate_category_chart": {
           const { days } = interpretation.data;
           const numDays = days || 30; // Default to 30 days if not specified
-          
+
           try {
             const expenses = await getCategoryReport(userIdString, numDays);
-            
+
             if (!expenses || expenses.length === 0) {
-              await sendCloudApiResponse(userPhoneNumber,
+              await sendCloudApiResponse(
+                userPhoneNumber,
                 `📊 Não há gastos registrados nos últimos ${numDays} dias.`
               );
               break;
             }
-            
-            const imageUrl = await generateCategoryChart(expenses, userIdString);
-            
+
+            const imageUrl = await generateCategoryChart(
+              expenses,
+              userIdString
+            );
+
             // Send image via Cloud API
-            const { CloudApiService } = await import("../services/cloudApiService.js");
+            const { CloudApiService } = await import(
+              "../services/cloudApiService.js"
+            );
             const cloudApiService = new CloudApiService();
-            const phoneNumber = userPhoneNumber.replace("whatsapp:", "").replace("+", "");
-            
-            await cloudApiService.sendMediaMessage(phoneNumber, imageUrl, `📊 Relatório de gastos por categoria dos últimos ${numDays} dias`);
-            
+            const phoneNumber = userPhoneNumber
+              .replace("whatsapp:", "")
+              .replace("+", "");
+
+            await cloudApiService.sendMediaMessage(
+              phoneNumber,
+              imageUrl,
+              `📊 Relatório de gastos por categoria dos últimos ${numDays} dias`
+            );
           } catch (error) {
             structuredLogger.error("Error generating category chart", {
               error: error.message,
               userIdString,
-              days: numDays
+              days: numDays,
             });
-            await sendCloudApiResponse(userPhoneNumber,
+            await sendCloudApiResponse(
+              userPhoneNumber,
               "❌ Erro ao gerar o relatório. Tente novamente em alguns instantes."
             );
           }
@@ -1294,33 +1945,48 @@ async function processMessageForCloudApi(
         case "generate_income_category_chart": {
           const { days } = interpretation.data;
           const numDays = days || 30; // Default to 30 days if not specified
-          
+
           try {
-            const incomeData = await getIncomeByCategoryReport(userIdString, numDays);
-            
+            const incomeData = await getIncomeByCategoryReport(
+              userIdString,
+              numDays
+            );
+
             if (!incomeData || incomeData.length === 0) {
-              await sendCloudApiResponse(userPhoneNumber,
+              await sendCloudApiResponse(
+                userPhoneNumber,
                 `📊 Não há receitas registradas nos últimos ${numDays} dias.`
               );
               break;
             }
-            
-            const imageUrl = await generateIncomeChart(incomeData, userIdString);
-            
+
+            const imageUrl = await generateIncomeChart(
+              incomeData,
+              userIdString
+            );
+
             // Send image via Cloud API
-            const { CloudApiService } = await import("../services/cloudApiService.js");
+            const { CloudApiService } = await import(
+              "../services/cloudApiService.js"
+            );
             const cloudApiService = new CloudApiService();
-            const phoneNumber = userPhoneNumber.replace("whatsapp:", "").replace("+", "");
-            
-            await cloudApiService.sendMediaMessage(phoneNumber, imageUrl, `📊 Relatório de receitas por categoria dos últimos ${numDays} dias`);
-            
+            const phoneNumber = userPhoneNumber
+              .replace("whatsapp:", "")
+              .replace("+", "");
+
+            await cloudApiService.sendMediaMessage(
+              phoneNumber,
+              imageUrl,
+              `📊 Relatório de receitas por categoria dos últimos ${numDays} dias`
+            );
           } catch (error) {
             structuredLogger.error("Error generating income chart", {
               error: error.message,
               userIdString,
-              days: numDays
+              days: numDays,
             });
-            await sendCloudApiResponse(userPhoneNumber,
+            await sendCloudApiResponse(
+              userPhoneNumber,
               "❌ Erro ao gerar o relatório. Tente novamente em alguns instantes."
             );
           }
@@ -1329,6 +1995,294 @@ async function processMessageForCloudApi(
 
         case "greeting": {
           sendGreetingMessage(twiml);
+          break;
+        }
+
+        case "create_inventory_template": {
+          const { templateName } = interpretation.data;
+
+          // Verificar acesso à funcionalidade de estoque (plano diamante)
+          // Verifica ambas as grafias devido ao erro de digitação no banco
+          const userHasInventoryAccess = await hasAccessToFeature(
+            userObjectId,
+            "inventory"  // Grafia correta
+          );
+
+          if (!userHasInventoryAccess) {
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              "💎 A funcionalidade de *Controle de Estoque* está disponível apenas no Plano Diamante.\n\n" +
+              "Para ter acesso a esta e outras funcionalidades premium, acesse: adapfinanceira.com.br/planos"
+            );
+            break;
+          }
+
+          if (!templateName) {
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              "🚫 Não consegui identificar o nome do estoque. Por favor, tente novamente. Ex: 'criar estoque de camisetas'."
+            );
+            break;
+          }
+
+          // Verificar se já existe um template com esse nome
+          const existingTemplate = await InventoryTemplate.findOne({
+            userId: userIdString,
+            templateName: templateName.toLowerCase()
+          });
+
+          if (existingTemplate) {
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              `Já existe um estoque chamado *${templateName}*. Escolha outro nome.`
+            );
+            break;
+          }
+
+          // Iniciar fluxo conversacional para definir campos
+          await sendCloudApiResponse(
+            userPhoneNumber,
+            `Vamos criar o estoque ${templateName}! 🎉\n\n` +
+            `Quais informações você quer salvar para cada item?\n` +
+            `Envie os nomes dos campos separados por vírgula (de 2 a 10).\n\n` +
+            `Exemplo: nome, cor, tamanho, preço de custo`
+          );
+
+          // Salvar estado da conversa
+          conversationState[userIdString] = {
+            awaiting: "inventory_fields",
+            templateName: templateName.toLowerCase()
+          };
+
+          break;
+        }
+
+        case "add_product_to_inventory": {
+          const { templateName } = interpretation.data;
+
+          // Verificar acesso à funcionalidade de estoque
+          const userHasInventoryAccess = await hasAccessToFeature(
+            userObjectId,
+            "inventory"
+          );
+
+          if (!userHasInventoryAccess) {
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              "💎 A funcionalidade de *Controle de Estoque* está disponível apenas no Plano Diamante.\n\n" +
+              "Para ter acesso a esta e outras funcionalidades premium, acesse: adapfinanceira.com.br/planos"
+            );
+            break;
+          }
+
+          if (!templateName) {
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              "🚫 Não consegui identificar o tipo de produto. Por favor, tente novamente. Ex: 'adicionar bermuda'."
+            );
+            break;
+          }
+
+          // Buscar template existente (busca flexível)
+          const template = await InventoryTemplate.findOne({
+            userId: userIdString,
+            templateName: { $regex: new RegExp(templateName, 'i') }
+          });
+
+          if (!template) {
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              `🚫 Não encontrei um estoque para *${templateName}*.\n\n` +
+              `Para criar um novo estoque, diga: "criar estoque de ${templateName}"`
+            );
+            break;
+          }
+
+          // Iniciar fluxo para adicionar produto
+          const fieldsText = template.fields.map(field => 
+            field.charAt(0).toUpperCase() + field.slice(1)
+          ).join(', ');
+
+          await sendCloudApiResponse(
+            userPhoneNumber,
+            `Ok, adicionando um novo item ao estoque *${template.templateName}*.\n\n` +
+            `Por favor, envie os valores para os seguintes campos, separados por vírgula:\n\n` +
+            `*${fieldsText}*`
+          );
+
+          // Salvar estado da conversa
+          conversationState[userIdString] = {
+            awaiting: "product_attributes",
+            templateId: template._id.toString(),
+            templateName: template.templateName,
+            fields: template.fields
+          };
+
+          break;
+        }
+
+        case "update_inventory_quantity": {
+          const { quantity, productId } = interpretation.data;
+
+          // Verificar acesso à funcionalidade de estoque
+          const userHasInventoryAccess = await hasAccessToFeature(
+            userObjectId,
+            "inventory"
+          );
+
+          if (!userHasInventoryAccess) {
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              "💎 A funcionalidade de *Controle de Estoque* está disponível apenas no Plano Diamante.\n\n" +
+              "Para ter acesso a esta e outras funcionalidades premium, acesse: adapfinanceira.com.br/planos"
+            );
+            break;
+          }
+
+          if (!productId || quantity === undefined || quantity === null) {
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              "🚫 Não consegui identificar o produto ou quantidade. Por favor, tente novamente. Ex: 'entrada 10 #P0001' ou 'saída 5 #P0002'."
+            );
+            break;
+          }
+
+          try {
+            // Importar o modelo Product
+            const Product = (await import("../models/Product.js")).default;
+            
+            // Buscar produto pelo ID customizado
+            const product = await Product.findOne({
+              userId: userIdString,
+              customId: productId.toUpperCase()
+            }).populate('templateId');
+
+            if (!product) {
+              await sendCloudApiResponse(
+                userPhoneNumber,
+                `🚫 Produto #${productId.toUpperCase()} não encontrado.\n\n` +
+                `Verifique o ID do produto ou adicione um novo produto ao estoque.`
+              );
+              break;
+            }
+
+            // Calcular nova quantidade
+            const oldQuantity = product.quantity;
+            const newQuantity = Math.max(0, oldQuantity + quantity); // Não permitir quantidade negativa
+
+            // Atualizar quantidade no banco
+            await Product.updateOne(
+              { _id: product._id },
+              { $set: { quantity: newQuantity } }
+            );
+
+            // Obter primeiro atributo como nome do produto
+            const productName = product.attributes.get(product.templateId.fields[0]) || 'Produto';
+            
+            // Determinar tipo de operação
+            const operationType = quantity > 0 ? 'Entrada' : 'Saída';
+            const operationEmoji = quantity > 0 ? '📦' : '📤';
+            
+            // Criar mensagem de confirmação
+            let confirmationMessage = `${operationEmoji} *${operationType} registrada!*\n\n`;
+            confirmationMessage += `*Produto:* ${productName} (#${product.customId})\n`;
+            confirmationMessage += `*Quantidade ${operationType.toLowerCase()}:* ${Math.abs(quantity)} unidades\n`;
+            confirmationMessage += `*Estoque atual:* ${newQuantity} unidades`;
+
+            // Verificar alerta de estoque baixo
+            if (newQuantity <= product.minStockLevel && newQuantity > 0) {
+              confirmationMessage += `\n\n⚠️ *Alerta:* Estoque baixo! (Mínimo: ${product.minStockLevel})`;
+            } else if (newQuantity === 0) {
+              confirmationMessage += `\n\n🚨 *Atenção:* Produto em falta!`;
+            }
+
+            await sendCloudApiResponse(userPhoneNumber, confirmationMessage);
+
+          } catch (error) {
+            console.error('Erro ao atualizar quantidade do produto:', error);
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              "❌ Erro interno ao atualizar o estoque. Tente novamente."
+            );
+          }
+
+          break;
+        }
+
+        case "set_inventory_alert": {
+          const { productId, quantity } = interpretation.data;
+
+          // Verificar acesso à funcionalidade de estoque
+          const userHasInventoryAccess = await hasAccessToFeature(
+            userObjectId,
+            "inventory"
+          );
+
+          if (!userHasInventoryAccess) {
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              "💎 A funcionalidade de *Controle de Estoque* está disponível apenas no Plano Diamante.\n\n" +
+              "Para ter acesso a esta e outras funcionalidades premium, acesse: adapfinanceira.com.br/planos"
+            );
+            break;
+          }
+
+          if (!productId || quantity === undefined || quantity === null || quantity < 0) {
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              "🚫 Não consegui identificar o produto ou quantidade do alerta. Por favor, tente novamente. Ex: 'alerta #P0001 5 unidades'."
+            );
+            break;
+          }
+
+          try {
+            // Importar o modelo Product
+            const Product = (await import("../models/Product.js")).default;
+            
+            // Buscar produto pelo ID customizado
+            const product = await Product.findOne({
+              userId: userIdString,
+              customId: productId.toUpperCase()
+            }).populate('templateId');
+
+            if (!product) {
+              await sendCloudApiResponse(
+                userPhoneNumber,
+                `🚫 Produto #${productId.toUpperCase()} não encontrado.\n\n` +
+                `Verifique o ID do produto ou adicione um novo produto ao estoque.`
+              );
+              break;
+            }
+
+            // Atualizar nível mínimo de estoque
+            await Product.updateOne(
+              { _id: product._id },
+              { $set: { minStockLevel: quantity } }
+            );
+
+            // Obter primeiro atributo como nome do produto
+            const productName = product.attributes.get(product.templateId.fields[0]) || 'Produto';
+            
+            // Criar mensagem de confirmação
+            let confirmationMessage = `✅ Alerta para o produto *${productName}* (#${product.customId}) definido para *${quantity} unidades*.`;
+
+            // Verificar se o estoque atual já está abaixo do novo limite
+            if (product.quantity <= quantity && product.quantity > 0) {
+              confirmationMessage += `\n\n⚠️ *Atenção:* O estoque atual (${product.quantity} unidades) já está no nível de alerta!`;
+            } else if (product.quantity === 0) {
+              confirmationMessage += `\n\n🚨 *Atenção:* Produto atualmente em falta!`;
+            }
+
+            await sendCloudApiResponse(userPhoneNumber, confirmationMessage);
+
+          } catch (error) {
+            console.error('Erro ao definir alerta de estoque:', error);
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              "❌ Erro interno ao definir o alerta. Tente novamente."
+            );
+          }
+
           break;
         }
 
@@ -1344,145 +2298,22 @@ async function processMessageForCloudApi(
 }
 
 /**
- * Process a single Cloud API message
- */
-async function processSingleCloudApiMessage(message, contacts, metadata) {
-  try {
-    console.log('🔍 PROCESSSINGLE DEBUG - Mensagem recebida:');
-    console.log('Message:', JSON.stringify(message, null, 2));
-    console.log('Contacts:', JSON.stringify(contacts, null, 2));
-    console.log('Metadata:', JSON.stringify(metadata, null, 2));
-    
-    structuredLogger.info("processSingleCloudApiMessage called", {
-      message,
-      contacts,
-      metadata
-    });
-
-    const { id, from, timestamp, type, text, image, audio, document } = message;
-
-    // Skip status messages and other non-user messages
-    if (!from || !type) {
-      structuredLogger.debug("Skipping non-user message", { id, type });
-      return;
-    }
-
-    structuredLogger.info("Processing Cloud API message", {
-      messageId: id,
-      from,
-      type,
-      timestamp,
-    });
-
-    // Extract user message content based on message type
-    let userMessage = "";
-    let isImage = false;
-    let mediaUrl = null;
-
-    switch (type) {
-      case "text":
-        userMessage = text?.body || "";
-        break;
-
-      case "image":
-        isImage = true;
-        mediaUrl = image?.id; // Cloud API provides media ID, not direct URL
-        userMessage = image?.caption || "";
-        break;
-
-      case "audio":
-        mediaUrl = audio?.id;
-        userMessage = "[Audio message]"; // Will be transcribed in processing
-        break;
-
-      case "document":
-        isImage = true; // Treat documents as images for processing
-        mediaUrl = document?.id;
-        userMessage = document?.caption || "[Document received]";
-        break;
-
-      default:
-        structuredLogger.info("Unsupported message type", {
-          type,
-          messageId: id,
-        });
-        return;
-    }
-
-    // Format phone number for compatibility with existing system
-    // For database lookup, use the number as received (without prefixes)
-    // For legacy compatibility, also create the whatsapp: format
-    const userPhoneNumber = from; // Use the number as received from WhatsApp
-    const legacyPhoneNumber = `whatsapp:+${from}`; // For legacy compatibility
-
-    structuredLogger.info("Formatted Cloud API message for processing", {
-      messageId: id,
-      userPhoneNumber,
-      messageType: type,
-      hasMedia: !!mediaUrl,
-      messageLength: userMessage.length,
-    });
-
-    // Handle audio messages with AudioMessageHandler
-    if (type === "audio") {
-      await processAudioMessageWithHandler(
-        mediaUrl,
-        userPhoneNumber,
-        id
-      );
-      return;
-    }
-
-    // Create a mock request object compatible with existing processing logic
-    const mockReq = {
-      body: {
-        From: userPhoneNumber,
-        Body: userMessage,
-        MediaUrl0: mediaUrl, // This will be the media ID for Cloud API
-        MediaContentType0: isImage
-          ? "image/jpeg"
-          : type === "audio"
-          ? "audio/ogg"
-          : "application/octet-stream",
-      },
-      cloudApiMessage: {
-        id,
-        type,
-        timestamp,
-        originalMessage: message,
-      },
-    };
-
-    // Process the message using existing logic
-    await processMessageWithExistingLogic(
-      mockReq,
-      isImage,
-      userMessage,
-      userPhoneNumber,
-      id
-    );
-  } catch (error) {
-    structuredLogger.error("Error processing single Cloud API message", {
-      error: error.message,
-      messageId: message?.id,
-      from: message?.from,
-    });
-  }
-}
-
-/**
  * Process audio message using AudioMessageHandler
  */
-async function processAudioMessageWithHandler(audioId, userPhoneNumber, messageId) {
+async function processAudioMessageWithHandler(
+  audioId,
+  userPhoneNumber,
+  messageId
+) {
   try {
     structuredLogger.info("Processing audio message with AudioMessageHandler", {
       audioId,
       userPhoneNumber,
-      messageId
+      messageId,
     });
 
     // Send processing feedback to user using standardized message
-    await sendAudioFeedbackMessage(userPhoneNumber, 'PROCESSING');
+    await sendAudioFeedbackMessage(userPhoneNumber, "PROCESSING");
 
     // Import Cloud API service
     const { CloudApiService } = await import("../services/cloudApiService.js");
@@ -1499,7 +2330,9 @@ async function processAudioMessageWithHandler(audioId, userPhoneNumber, messageI
       userPhoneNumber,
       messageId,
       transcriptionLength: transcription.length,
-      transcriptionPreview: transcription.substring(0, 50) + (transcription.length > 50 ? '...' : '')
+      transcriptionPreview:
+        transcription.substring(0, 50) +
+        (transcription.length > 50 ? "..." : ""),
     });
 
     // Create a mock request object for processing the transcribed text
@@ -1526,7 +2359,6 @@ async function processAudioMessageWithHandler(audioId, userPhoneNumber, messageI
       userPhoneNumber,
       messageId
     );
-
   } catch (error) {
     structuredLogger.error("Error processing audio message with handler", {
       error: error.message,
@@ -1534,12 +2366,12 @@ async function processAudioMessageWithHandler(audioId, userPhoneNumber, messageI
       userPhoneNumber,
       messageId,
       errorType: error.constructor.name,
-      errorCode: error.errorType || 'UNKNOWN_ERROR'
+      errorCode: error.errorType || "UNKNOWN_ERROR",
     });
 
     // Determine appropriate error message based on error type
     let errorMessage;
-    
+
     if (error.userMessage) {
       // Use the user-friendly message from AudioProcessingError
       errorMessage = error.userMessage;
@@ -1548,18 +2380,30 @@ async function processAudioMessageWithHandler(audioId, userPhoneNumber, messageI
       errorMessage = getAudioErrorMessage(error.errorType);
     } else {
       // Fallback to analyzing error message content
-      if (error.message.includes('timeout')) {
-        errorMessage = getAudioErrorMessage('PROCESSING_TIMEOUT');
-      } else if (error.message.includes('network') || error.message.includes('download')) {
-        errorMessage = getAudioErrorMessage('NETWORK_ERROR');
-      } else if (error.message.includes('format') || error.message.includes('unsupported')) {
-        errorMessage = getAudioErrorMessage('UNSUPPORTED_FORMAT');
-      } else if (error.message.includes('size') || error.message.includes('large')) {
-        errorMessage = getAudioErrorMessage('FILE_TOO_LARGE');
-      } else if (error.message.includes('OpenAI') || error.message.includes('API')) {
-        errorMessage = getAudioErrorMessage('SERVICE_UNAVAILABLE');
+      if (error.message.includes("timeout")) {
+        errorMessage = getAudioErrorMessage("PROCESSING_TIMEOUT");
+      } else if (
+        error.message.includes("network") ||
+        error.message.includes("download")
+      ) {
+        errorMessage = getAudioErrorMessage("NETWORK_ERROR");
+      } else if (
+        error.message.includes("format") ||
+        error.message.includes("unsupported")
+      ) {
+        errorMessage = getAudioErrorMessage("UNSUPPORTED_FORMAT");
+      } else if (
+        error.message.includes("size") ||
+        error.message.includes("large")
+      ) {
+        errorMessage = getAudioErrorMessage("FILE_TOO_LARGE");
+      } else if (
+        error.message.includes("OpenAI") ||
+        error.message.includes("API")
+      ) {
+        errorMessage = getAudioErrorMessage("SERVICE_UNAVAILABLE");
       } else {
-        errorMessage = getAudioErrorMessage('UNKNOWN_ERROR');
+        errorMessage = getAudioErrorMessage("UNKNOWN_ERROR");
       }
     }
 
@@ -1603,11 +2447,15 @@ async function processCloudApiMedia(
         mediaId,
         errors: validation.errors,
       });
-      await sendErrorMessageWithFallback(userPhoneNumber, `❌ Arquivo inválido: ${validation.errors.join(", ")}`, {
-        errorType: "INVALID_MEDIA_CONTENT",
-        mediaId,
-        errors: validation.errors
-      });
+      await sendErrorMessageWithFallback(
+        userPhoneNumber,
+        `❌ Arquivo inválido: ${validation.errors.join(", ")}`,
+        {
+          errorType: "INVALID_MEDIA_CONTENT",
+          mediaId,
+          errors: validation.errors,
+        }
+      );
       return;
     }
 
@@ -1656,12 +2504,13 @@ async function processCloudApiMedia(
 
       default:
         // Send message via Cloud API
-        await sendErrorMessageWithFallback(userPhoneNumber,
+        await sendErrorMessageWithFallback(
+          userPhoneNumber,
           `📄 Tipo de arquivo ${mediaType} recebido, mas processamento específico ainda não implementado.`,
           {
             errorType: "UNSUPPORTED_MEDIA_TYPE",
             mediaType,
-            mediaId
+            mediaId,
           }
         );
         structuredLogger.info("Unsupported media type for processing", {
@@ -1676,12 +2525,13 @@ async function processCloudApiMedia(
       userPhoneNumber,
     });
     // Send error message via Cloud API
-    await sendErrorMessageWithFallback(userPhoneNumber,
+    await sendErrorMessageWithFallback(
+      userPhoneNumber,
       "❌ Erro ao processar arquivo. Tente novamente ou envie um arquivo diferente.",
       {
         errorType: "MEDIA_PROCESSING_ERROR",
         mediaId,
-        error: error.message
+        error: error.message,
       }
     );
   }
@@ -1690,13 +2540,18 @@ async function processCloudApiMedia(
 /**
  * Handle image processing errors with specific error scenarios
  */
-async function handleImageProcessingError(error, userPhoneNumber, mediaData, tempMediaUrl) {
+async function handleImageProcessingError(
+  error,
+  userPhoneNumber,
+  mediaData,
+  tempMediaUrl
+) {
   const errorContext = {
     userPhoneNumber,
     mediaId: mediaData?.id,
     mimeType: mediaData?.mimeType,
     errorMessage: error.message,
-    errorStack: error.stack
+    errorStack: error.stack,
   };
 
   let userMessage = "❌ Erro ao processar imagem. Tente novamente.";
@@ -1704,61 +2559,87 @@ async function handleImageProcessingError(error, userPhoneNumber, mediaData, tem
 
   try {
     // Classify error type and provide specific handling
-    if (error.message?.includes('MIME type') || error.message?.includes('mime')) {
+    if (
+      error.message?.includes("MIME type") ||
+      error.message?.includes("mime")
+    ) {
       // AI service MIME type errors
-      userMessage = "🚫 Formato de arquivo não suportado. Envie uma imagem JPG, PNG ou PDF.";
+      userMessage =
+        "🚫 Formato de arquivo não suportado. Envie uma imagem JPG, PNG ou PDF.";
       logLevel = "warn";
       errorContext.errorType = "MIME_TYPE_ERROR";
-      
-    } else if (error.message?.includes('OpenAI') || error.message?.includes('AI service')) {
+    } else if (
+      error.message?.includes("OpenAI") ||
+      error.message?.includes("AI service")
+    ) {
       // OpenAI API failures
-      userMessage = "🤖 Serviço de análise temporariamente indisponível. Tente novamente em alguns minutos.";
+      userMessage =
+        "🤖 Serviço de análise temporariamente indisponível. Tente novamente em alguns minutos.";
       errorContext.errorType = "AI_SERVICE_ERROR";
-      
-    } else if (error.message?.includes('database') || error.message?.includes('Transaction') || 
-               error.message?.includes('UserStats') || error.message?.includes('save')) {
+    } else if (
+      error.message?.includes("database") ||
+      error.message?.includes("Transaction") ||
+      error.message?.includes("UserStats") ||
+      error.message?.includes("save")
+    ) {
       // Database operation errors
-      userMessage = "💾 Erro ao salvar dados. Sua transação foi processada mas pode não ter sido salva. Verifique seu histórico.";
+      userMessage =
+        "💾 Erro ao salvar dados. Sua transação foi processada mas pode não ter sido salva. Verifique seu histórico.";
       errorContext.errorType = "DATABASE_ERROR";
-      
-    } else if (error.message?.includes('Cloud API') || error.message?.includes('sendCloudApiMessage')) {
+    } else if (
+      error.message?.includes("Cloud API") ||
+      error.message?.includes("sendCloudApiMessage")
+    ) {
       // Cloud API message sending errors
-      userMessage = "📱 Erro ao enviar resposta. Sua imagem foi processada mas a confirmação pode não ter chegado.";
+      userMessage =
+        "📱 Erro ao enviar resposta. Sua imagem foi processada mas a confirmação pode não ter chegado.";
       errorContext.errorType = "CLOUD_API_MESSAGE_ERROR";
-      
-    } else if (error.message?.includes('createTempMediaUrl') || error.message?.includes('media')) {
+    } else if (
+      error.message?.includes("createTempMediaUrl") ||
+      error.message?.includes("media")
+    ) {
       // Media processing errors
-      userMessage = "📁 Erro ao processar arquivo. Verifique se a imagem não está corrompida e tente novamente.";
+      userMessage =
+        "📁 Erro ao processar arquivo. Verifique se a imagem não está corrompida e tente novamente.";
       errorContext.errorType = "MEDIA_PROCESSING_ERROR";
-      
-    } else if (error.message?.includes('timeout') || error.message?.includes('TIMEOUT')) {
+    } else if (
+      error.message?.includes("timeout") ||
+      error.message?.includes("TIMEOUT")
+    ) {
       // Timeout errors
-      userMessage = "⏱️ Processamento demorou muito. Tente com uma imagem menor ou mais nítida.";
+      userMessage =
+        "⏱️ Processamento demorou muito. Tente com uma imagem menor ou mais nítida.";
       errorContext.errorType = "TIMEOUT_ERROR";
-      
     } else {
       // Unknown errors
       errorContext.errorType = "UNKNOWN_ERROR";
-      userMessage = "❌ Erro inesperado ao processar imagem. Tente uma foto mais nítida ou entre em contato com o suporte.";
+      userMessage =
+        "❌ Erro inesperado ao processar imagem. Tente uma foto mais nítida ou entre em contato com o suporte.";
     }
 
     // Log error with appropriate level
     if (logLevel === "warn") {
-      structuredLogger.warn("Image processing error (recoverable)", errorContext);
+      structuredLogger.warn(
+        "Image processing error (recoverable)",
+        errorContext
+      );
     } else {
       structuredLogger.error("Image processing error", errorContext);
     }
 
     // Attempt to send error message to user with fallback handling
-    await sendErrorMessageWithFallback(userPhoneNumber, userMessage, errorContext);
-
+    await sendErrorMessageWithFallback(
+      userPhoneNumber,
+      userMessage,
+      errorContext
+    );
   } catch (errorHandlingError) {
     // If error handling itself fails, log it but don't throw
     structuredLogger.error("Error in image processing error handler", {
       originalError: error.message,
       errorHandlingError: errorHandlingError.message,
       userPhoneNumber,
-      mediaId: mediaData?.id
+      mediaId: mediaData?.id,
     });
   } finally {
     // Always attempt cleanup, even if error handling fails
@@ -1767,13 +2648,13 @@ async function handleImageProcessingError(error, userPhoneNumber, mediaData, tem
         await cleanupTempMediaUrl(tempMediaUrl);
         structuredLogger.info("Cleanup completed after error", {
           userPhoneNumber,
-          mediaId: mediaData?.id
+          mediaId: mediaData?.id,
         });
       } catch (cleanupError) {
         structuredLogger.warn("Failed to cleanup temp media after error", {
           cleanupError: cleanupError.message,
           userPhoneNumber,
-          mediaId: mediaData?.id
+          mediaId: mediaData?.id,
         });
       }
     }
@@ -1783,28 +2664,33 @@ async function handleImageProcessingError(error, userPhoneNumber, mediaData, tem
 /**
  * Send error message with fallback handling and comprehensive logging
  */
-async function sendErrorMessageWithFallback(userPhoneNumber, message, errorContext) {
-  const messageAttemptId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-  
+async function sendErrorMessageWithFallback(
+  userPhoneNumber,
+  message,
+  errorContext
+) {
+  const messageAttemptId = `msg_${Date.now()}_${Math.random()
+    .toString(36)
+    .substring(2, 8)}`;
+
   structuredLogger.info("Attempting to send error message", {
     messageAttemptId,
     userPhoneNumber,
     messageLength: message.length,
     errorType: errorContext.errorType,
-    originalError: errorContext.errorMessage
+    originalError: errorContext.errorMessage,
   });
 
   try {
     await sendCloudApiMessage(userPhoneNumber, message);
-    
+
     structuredLogger.info("Error message sent successfully via Cloud API", {
       messageAttemptId,
       userPhoneNumber,
       messageLength: message.length,
       errorType: errorContext.errorType,
-      method: "CloudAPI"
+      method: "CloudAPI",
     });
-    
   } catch (messagingError) {
     // If Cloud API message sending fails, log the failure with detailed context
     structuredLogger.error("Failed to send error message via Cloud API", {
@@ -1813,53 +2699,54 @@ async function sendErrorMessageWithFallback(userPhoneNumber, message, errorConte
       messagingErrorType: messagingError.errorType || "UNKNOWN",
       originalErrorType: errorContext.errorType,
       userPhoneNumber,
-      attemptedMessage: message.substring(0, 100) + (message.length > 100 ? '...' : ''),
-      fallbackAttempt: true
+      attemptedMessage:
+        message.substring(0, 100) + (message.length > 100 ? "..." : ""),
+      fallbackAttempt: true,
     });
 
     // Try fallback to legacy messaging if available
     try {
-      const fallbackPhoneNumber = userPhoneNumber.startsWith('whatsapp:') 
-        ? userPhoneNumber 
+      const fallbackPhoneNumber = userPhoneNumber.startsWith("whatsapp:")
+        ? userPhoneNumber
         : `whatsapp:${userPhoneNumber}`;
-        
+
       await sendTextMessage(fallbackPhoneNumber, message);
-      
+
       structuredLogger.info("Error message sent via fallback method", {
         messageAttemptId,
         userPhoneNumber,
         errorType: errorContext.errorType,
         method: "Fallback",
-        fallbackPhoneNumber
+        fallbackPhoneNumber,
       });
-      
     } catch (fallbackError) {
       // Log complete failure with all error details
-      structuredLogger.error("All message sending methods failed - user will not receive error notification", {
-        messageAttemptId,
-        cloudApiError: {
-          message: messagingError.message,
-          type: messagingError.errorType || "UNKNOWN"
-        },
-        fallbackError: {
-          message: fallbackError.message,
-          type: fallbackError.errorType || "UNKNOWN"
-        },
-        userPhoneNumber,
-        originalErrorType: errorContext.errorType,
-        originalError: errorContext.errorMessage,
-        attemptedMessage: message,
-        severity: "CRITICAL",
-        requiresManualIntervention: true
-      });
-      
+      structuredLogger.error(
+        "All message sending methods failed - user will not receive error notification",
+        {
+          messageAttemptId,
+          cloudApiError: {
+            message: messagingError.message,
+            type: messagingError.errorType || "UNKNOWN",
+          },
+          fallbackError: {
+            message: fallbackError.message,
+            type: fallbackError.errorType || "UNKNOWN",
+          },
+          userPhoneNumber,
+          originalErrorType: errorContext.errorType,
+          originalError: errorContext.errorMessage,
+          attemptedMessage: message,
+          severity: "CRITICAL",
+          requiresManualIntervention: true,
+        }
+      );
+
       // In a production system, this would trigger alerts for manual intervention
       // since the user cannot be notified of the error
     }
   }
 }
-
-
 
 /**
  * Process Cloud API image messages
@@ -1873,22 +2760,22 @@ async function processCloudApiImage(
   twiml
 ) {
   let tempMediaUrl = null;
-  
+
   try {
     structuredLogger.info("Starting Cloud API image processing", {
       userPhoneNumber,
       userIdString,
       mediaId: mediaData.id,
-      mimeType: mediaData.mimeType
+      mimeType: mediaData.mimeType,
     });
 
     // Create a temporary file or upload to cloud storage
     tempMediaUrl = await createTempMediaUrl(mediaData);
-    
+
     structuredLogger.info("Temporary media URL created", {
       userPhoneNumber,
       mediaId: mediaData.id,
-      tempUrl: tempMediaUrl ? "created" : "failed"
+      tempUrl: tempMediaUrl ? "created" : "failed",
     });
 
     // Use existing AI service for document interpretation
@@ -1934,16 +2821,16 @@ async function processCloudApiImage(
         const successMessage = `✅ Despesa de *${storeName}* no valor de *R$ ${totalAmount.toFixed(
           2
         )}* registrada com sucesso!`;
-        
+
         await sendCloudApiMessage(userPhoneNumber, successMessage);
-        
+
         structuredLogger.info("Store receipt processed successfully", {
           userPhoneNumber,
           storeName,
           totalAmount,
           category: category.toLowerCase(),
           transactionId: newExpense._id.toString(),
-          messageLength: successMessage.length
+          messageLength: successMessage.length,
         });
         break;
       }
@@ -1964,17 +2851,20 @@ async function processCloudApiImage(
           awaiting: "payment_status_confirmation",
           payload: result.data,
         };
-        
+
         await sendCloudApiMessage(userPhoneNumber, confirmationMessage);
-        
-        structuredLogger.info("Utility bill identified, awaiting payment confirmation", {
-          userPhoneNumber,
-          provider,
-          totalAmount,
-          dueDate,
-          formattedDate,
-          conversationState: "payment_status_confirmation"
-        });
+
+        structuredLogger.info(
+          "Utility bill identified, awaiting payment confirmation",
+          {
+            userPhoneNumber,
+            provider,
+            totalAmount,
+            dueDate,
+            formattedDate,
+            conversationState: "payment_status_confirmation",
+          }
+        );
         break;
       }
 
@@ -1990,30 +2880,34 @@ async function processCloudApiImage(
           awaiting: "pix_type_confirmation",
           payload: result.data,
         };
-        
+
         await sendCloudApiMessage(userPhoneNumber, pixMessage);
-        
-        structuredLogger.info("PIX receipt identified, awaiting type confirmation", {
-          userPhoneNumber,
-          totalAmount,
-          counterpartName,
-          conversationState: "pix_type_confirmation"
-        });
+
+        structuredLogger.info(
+          "PIX receipt identified, awaiting type confirmation",
+          {
+            userPhoneNumber,
+            totalAmount,
+            counterpartName,
+            conversationState: "pix_type_confirmation",
+          }
+        );
         break;
       }
 
       default:
         // Send error message via Cloud API
-        const unrecognizedMessage = "🫤 Desculpe, não consegui identificar um documento financeiro válido nesta imagem. Tente uma foto mais nítida.";
-        
+        const unrecognizedMessage =
+          "🫤 Desculpe, não consegui identificar um documento financeiro válido nesta imagem. Tente uma foto mais nítida.";
+
         await sendCloudApiMessage(userPhoneNumber, unrecognizedMessage);
-        
+
         structuredLogger.warn("Unrecognized document type in image", {
           userPhoneNumber,
           mediaId: mediaData.id,
           documentType: result.documentType || "unknown",
           aiResult: result,
-          messageLength: unrecognizedMessage.length
+          messageLength: unrecognizedMessage.length,
         });
         break;
     }
@@ -2023,40 +2917,61 @@ async function processCloudApiImage(
       await cleanupTempMediaUrl(tempMediaUrl);
       structuredLogger.info("Temporary media URL cleaned up", {
         userPhoneNumber,
-        mediaId: mediaData.id
+        mediaId: mediaData.id,
       });
     }
   } catch (error) {
     // Enhanced error handling for different failure scenarios
-    await handleImageProcessingError(error, userPhoneNumber, mediaData, tempMediaUrl);
+    await handleImageProcessingError(
+      error,
+      userPhoneNumber,
+      mediaData,
+      tempMediaUrl
+    );
   }
 }
 
 /**
  * Handle document processing errors
  */
-async function handleDocumentProcessingError(error, userPhoneNumber, mediaData) {
+async function handleDocumentProcessingError(
+  error,
+  userPhoneNumber,
+  mediaData
+) {
   const errorContext = {
     userPhoneNumber,
     mediaId: mediaData?.id,
     mimeType: mediaData?.mimeType,
     errorMessage: error.message,
-    errorType: "DOCUMENT_PROCESSING_ERROR"
+    errorType: "DOCUMENT_PROCESSING_ERROR",
   };
 
   let userMessage = "❌ Erro ao processar documento. Tente novamente.";
 
   // Classify document-specific errors
-  if (error.message?.includes('PDF') || error.message?.includes('document format')) {
-    userMessage = "📄 Formato de documento não suportado. Envie um PDF ou imagem do documento.";
+  if (
+    error.message?.includes("PDF") ||
+    error.message?.includes("document format")
+  ) {
+    userMessage =
+      "📄 Formato de documento não suportado. Envie um PDF ou imagem do documento.";
     errorContext.errorType = "UNSUPPORTED_DOCUMENT_FORMAT";
-  } else if (error.message?.includes('text extraction') || error.message?.includes('OCR')) {
-    userMessage = "🔍 Não foi possível extrair texto do documento. Tente uma imagem mais nítida.";
+  } else if (
+    error.message?.includes("text extraction") ||
+    error.message?.includes("OCR")
+  ) {
+    userMessage =
+      "🔍 Não foi possível extrair texto do documento. Tente uma imagem mais nítida.";
     errorContext.errorType = "TEXT_EXTRACTION_ERROR";
   }
 
   structuredLogger.error("Document processing error", errorContext);
-  await sendErrorMessageWithFallback(userPhoneNumber, userMessage, errorContext);
+  await sendErrorMessageWithFallback(
+    userPhoneNumber,
+    userMessage,
+    errorContext
+  );
 }
 
 /**
@@ -2068,25 +2983,42 @@ async function handleAudioProcessingError(error, userPhoneNumber, mediaData) {
     mediaId: mediaData?.id,
     mimeType: mediaData?.mimeType,
     errorMessage: error.message,
-    errorType: "AUDIO_PROCESSING_ERROR"
+    errorType: "AUDIO_PROCESSING_ERROR",
   };
 
-  let userMessage = "❌ Desculpe, não consegui processar seu áudio. Tente enviar uma mensagem de texto.";
+  let userMessage =
+    "❌ Desculpe, não consegui processar seu áudio. Tente enviar uma mensagem de texto.";
 
   // Classify audio-specific errors
-  if (error.message?.includes('transcription') || error.message?.includes('Whisper')) {
-    userMessage = "🎤 Não foi possível transcrever o áudio. Tente falar mais claramente ou enviar uma mensagem de texto.";
+  if (
+    error.message?.includes("transcription") ||
+    error.message?.includes("Whisper")
+  ) {
+    userMessage =
+      "🎤 Não foi possível transcrever o áudio. Tente falar mais claramente ou enviar uma mensagem de texto.";
     errorContext.errorType = "TRANSCRIPTION_ERROR";
-  } else if (error.message?.includes('audio format') || error.message?.includes('codec')) {
-    userMessage = "🎵 Formato de áudio não suportado. Envie um áudio em formato compatível.";
+  } else if (
+    error.message?.includes("audio format") ||
+    error.message?.includes("codec")
+  ) {
+    userMessage =
+      "🎵 Formato de áudio não suportado. Envie um áudio em formato compatível.";
     errorContext.errorType = "UNSUPPORTED_AUDIO_FORMAT";
-  } else if (error.message?.includes('duration') || error.message?.includes('too long')) {
-    userMessage = "⏱️ Áudio muito longo. Envie um áudio de até 2 minutos ou uma mensagem de texto.";
+  } else if (
+    error.message?.includes("duration") ||
+    error.message?.includes("too long")
+  ) {
+    userMessage =
+      "⏱️ Áudio muito longo. Envie um áudio de até 2 minutos ou uma mensagem de texto.";
     errorContext.errorType = "AUDIO_TOO_LONG";
   }
 
   structuredLogger.error("Audio processing error", errorContext);
-  await sendErrorMessageWithFallback(userPhoneNumber, userMessage, errorContext);
+  await sendErrorMessageWithFallback(
+    userPhoneNumber,
+    userMessage,
+    errorContext
+  );
 }
 
 /**
@@ -2185,19 +3117,22 @@ async function createTempMediaUrl(mediaData) {
     const base64Content = mediaData.content.toString("base64");
     const dataUrl = `data:${mediaData.mimeType};base64,${base64Content}`;
 
-    console.log('Creating data URL - MIME type:', mediaData.mimeType);
-    console.log('Content type:', typeof mediaData.content);
-    console.log('Content is Buffer:', Buffer.isBuffer(mediaData.content));
-    console.log('Content length:', mediaData.content.length);
-    console.log('Base64 length:', base64Content.length);
-    console.log('Data URL preview:', dataUrl.substring(0, 100) + '...');
-    
+    console.log("Creating data URL - MIME type:", mediaData.mimeType);
+    console.log("Content type:", typeof mediaData.content);
+    console.log("Content is Buffer:", Buffer.isBuffer(mediaData.content));
+    console.log("Content length:", mediaData.content.length);
+    console.log("Base64 length:", base64Content.length);
+    console.log("Data URL preview:", dataUrl.substring(0, 100) + "...");
+
     // Validate the base64 content
     try {
-      const testBuffer = Buffer.from(base64Content, 'base64');
-      console.log('Base64 validation successful, decoded length:', testBuffer.length);
+      const testBuffer = Buffer.from(base64Content, "base64");
+      console.log(
+        "Base64 validation successful, decoded length:",
+        testBuffer.length
+      );
     } catch (e) {
-      console.log('Base64 validation failed:', e.message);
+      console.log("Base64 validation failed:", e.message);
     }
 
     structuredLogger.info("Created temporary media URL", {

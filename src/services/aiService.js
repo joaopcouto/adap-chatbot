@@ -5,6 +5,7 @@ import path from "path";
 import { promisify } from "util";
 import stream from "stream";
 import { devLog } from "../helpers/logger.js";
+import { getCurrentDateInBrazil, formatDateTimeInBrazil } from "../utils/dateUtils.js";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -203,7 +204,8 @@ export async function transcribeAudioWithWhisper(audioInput) {
 }
 
 export async function interpretMessageWithAI(message, currentDate) {
-  const now = new Date(currentDate);
+  // Use Brazil timezone for current date context
+  const now = getCurrentDateInBrazil();
   const currentYear = now.getFullYear();
   const currentMonth = String(now.getMonth() + 1).padStart(2, "0");
   const currentDay = String(now.getDate()).padStart(2, "0");
@@ -221,6 +223,8 @@ export async function interpretMessageWithAI(message, currentDate) {
   - Ano atual: ${currentYear}
   - Mês atual: ${currentMonth} (${monthName})
   - Dia atual: ${currentDay} (${dayOfWeekName})
+  - Timezone: America/Sao_Paulo (Horário de Brasília)
+  - Horário atual: ${formatDateTimeInBrazil(now)}
 
   1. Identificar a Intenção:
     Priorize intenções relacionadas a "estoque" se as palavras-chave 'criar estoque', 'adicionar ao estoque', 'ver estoque', etc., estiverem presentes.
@@ -269,7 +273,10 @@ export async function interpretMessageWithAI(message, currentDate) {
     - Para "add_installment_expense": Extraia 'totalAmount', 'description' e 'installments'. A estrutura é tipicamente "(valor total) (descrição) em (parcelas)x" ou "parcelar (descrição) de (valor total) em (parcelas) vezes".
     - Para "delete_transaction": Extraia 'messageId'.
     - Para "reminder": Extraia 'description' e 'date' no formato ISO 8601.
-    - Para "reminder", resolva datas relativas como "amanhã", "dia 15", "próxima segunda" usando o **Contexto de Data Atual**. O formato da data deve ser ISO 8601 (YYYY-MM-DDTHH:mm:ss.sssZ).
+    - Para "reminder", resolva datas relativas como "amanhã", "dia 15", "próxima segunda" usando o **Contexto de Data Atual** no timezone de Brasília (America/Sao_Paulo). O formato da data deve ser ISO 8601 (YYYY-MM-DDTHH:mm:ss.sssZ).
+    - Quando apenas uma data é fornecida sem horário, assuma 09:00 AM no horário de Brasília.
+    - IMPORTANTE: Valide que datas relativas não resultem em horários no passado. Se "hoje às 10h" for solicitado e já passou das 10h, considere como inválido.
+    - Para datas como "dia 15" sem mês especificado, assuma o mês atual se o dia ainda não passou, ou o próximo mês se já passou.
     - Para as intenções "get_total" ou "get_total_income":
       - Se o usuário disser "receita total" ou "gasto total" sem especificar datas, use o mês atual. O campo 'month' deverá ser o mês e ano atual no formato "YYYY-MM" e 'monthName' o nome do mês atual.
       - Se o usuário especificar um período como "receita de DD/MM até DD/MM" ou "gastos do dia DD/MM", extraia 'startDate' e 'endDate' no formato ISO 8601 (YYYY-MM-DDTHH:mm:ss.sssZ). Para um único dia, 'startDate' e 'endDate' serão o mesmo dia, com 'startDate' no início do dia e 'endDate' no final do dia.
@@ -401,12 +408,16 @@ export async function interpretMessageWithAI(message, currentDate) {
       Resposta: { "intent": "instructions", "data": {} }
 
     - Usuário: "Dia 15 preciso pagar o meu cartão de crédito"
-      Resposta: { "intent": "reminder", "data": { "description": "pagar o meu cartão de crédito", "date": "2025-05-15T00:00:00.000Z" } }
+      Resposta: { "intent": "reminder", "data": { "description": "pagar o meu cartão de crédito", "date": "${currentYear}-${currentMonth}-15T09:00:00.000Z" } }
     - Usuário: "Tenho consulta no dentista amanhã às 15h"
       Resposta: { "intent": "reminder", "data": { "description": "consulta no dentista", "date": "${tomorrowISO.replace(
         "T00:00:00.000Z",
         "T15:00:00.000Z"
       )}" } }
+    - Usuário: "Me lembre de ligar para o médico hoje às 16h"
+      Resposta: { "intent": "reminder", "data": { "description": "ligar para o médico", "date": "${currentYear}-${currentMonth}-${currentDay}T16:00:00.000Z" } }
+    - Usuário: "Reunião depois de amanhã às 14h30"
+      Resposta: { "intent": "reminder", "data": { "description": "reunião", "date": "${new Date(tomorrow.getTime() + 24*60*60*1000).toISOString().split("T")[0]}T14:30:00.000Z" } }
 
     - Usuário: "Quais são meus lembretes?"
       Resposta: { "intent": "get_total_reminders", "data":{} }

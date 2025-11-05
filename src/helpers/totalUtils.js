@@ -1,7 +1,7 @@
 import Transaction from "../models/Transaction.js";
 import Category from "../models/Category.js";
 import Reminder from "../models/Reminder.js";
-import UserStats from "../models/UserStats.js"; 
+import UserStats from "../models/UserStats.js";
 import {
   TIMEZONE,
   formatInBrazilWithTime,
@@ -95,8 +95,12 @@ export async function calculateTotalIncome(
   endDate = null
 ) {
   try {
-    console.log("calculateTotalIncome called with:", { userId, month, categoryName });
-    
+    console.log("calculateTotalIncome called with:", {
+      userId,
+      month,
+      categoryName,
+    });
+
     const pipeline = [];
     const matchQuery = {
       userId: userId,
@@ -105,15 +109,33 @@ export async function calculateTotalIncome(
     };
 
     if (startDate && endDate) {
-        matchQuery.date = { $gte: new Date(startDate), $lte: new Date(endDate) };
-        pipeline.push({ $match: matchQuery });
+      matchQuery.date = { $gte: new Date(startDate), $lte: new Date(endDate) };
+      pipeline.push({ $match: matchQuery });
     } else if (month) {
-        pipeline.push({ $match: matchQuery });
-        pipeline.push({ $match: { $expr: { $eq: [ { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } }, month ] } } });
-        console.log("calculateTotalIncome - Month filter applied:", { month, matchQuery });
+      pipeline.push({ $match: matchQuery });
+      pipeline.push({
+        $match: {
+          $expr: {
+            $eq: [
+              {
+                $dateToString: {
+                  format: "%Y-%m",
+                  date: "$date",
+                  timezone: TIMEZONE,
+                },
+              },
+              month,
+            ],
+          },
+        },
+      });
+      console.log("calculateTotalIncome - Month filter applied:", {
+        month,
+        matchQuery,
+      });
     } else {
-        pipeline.push({ $match: matchQuery });
-        console.log("calculateTotalIncome - No month filter, querying all time");
+      pipeline.push({ $match: matchQuery });
+      console.log("calculateTotalIncome - No month filter, querying all time");
     }
 
     if (categoryName) {
@@ -164,9 +186,24 @@ export async function calculateTotalExpenses(
       pipeline.push({ $match: matchQuery });
     } else if (month) {
       pipeline.push({ $match: matchQuery });
-      pipeline.push({ $match: { $expr: { $eq: [ { $dateToString: { format: "%Y-%m", date: "$date", timezone: TIMEZONE } }, month ] } } });
+      pipeline.push({
+        $match: {
+          $expr: {
+            $eq: [
+              {
+                $dateToString: {
+                  format: "%Y-%m",
+                  date: "$date",
+                  timezone: TIMEZONE,
+                },
+              },
+              month,
+            ],
+          },
+        },
+      });
     } else {
-       pipeline.push({ $match: matchQuery });
+      pipeline.push({ $match: matchQuery });
     }
 
     if (categoryName) {
@@ -693,6 +730,7 @@ export async function getActiveInstallments(userId) {
   }
 }
 
+
 export async function getFormattedInventory(userId, templateName) {
   const template = await InventoryTemplate.findOne({
     userId: userId,
@@ -782,21 +820,25 @@ export async function getUserCategories(userId) {
 }
 
 export async function getFormattedCategories(userId) {
-  const categories = await Category.find({ userId: userId }).sort({ name: 1 }).lean();
+  const categories = await Category.find({ userId: userId })
+    .sort({ name: 1 })
+    .lean();
 
   if (categories.length === 0) {
     return "Você ainda não criou nenhuma categoria personalizada. Basta registrar um gasto com uma nova categoria para criá-la! Ex: `25 café em padaria`";
   }
 
   let message = "📁 *Suas Categorias e Limites Mensais:*\n\n";
-  message += categories.map(c => {
-    let line = `• ${c.name.charAt(0).toUpperCase() + c.name.slice(1)}`;
-    if (c.monthlyLimit && c.monthlyLimit > 0) {
-      line += ` (Limite: R$ ${c.monthlyLimit.toFixed(2)})`;
-    }
-    return line;
-  }).join("\n");
-  
+  message += categories
+    .map((c) => {
+      let line = `• ${c.name.charAt(0).toUpperCase() + c.name.slice(1)}`;
+      if (c.monthlyLimit && c.monthlyLimit > 0) {
+        line += ` (Limite: R$ ${c.monthlyLimit.toFixed(2)})`;
+      }
+      return line;
+    })
+    .join("\n");
+
   message += `\n\nPara definir um limite, envie: *limite [categoria] para [valor]*`;
   message += `\nPara excluir, envie: *excluir categoria [nome]*`;
 
@@ -805,47 +847,56 @@ export async function getFormattedCategories(userId) {
 
 export async function deleteCategoryAndTransactions(userId, categoryName) {
   const standardizedName = categoryName.trim().toLowerCase();
-  
+
   const category = await Category.findOne({
     userId: userId,
     name: standardizedName,
   });
 
   if (!category) {
-    return { success: false, message: `🚫 Categoria "*${categoryName}*" não encontrada.` };
+    return {
+      success: false,
+      message: `🚫 Categoria "*${categoryName}*" não encontrada.`,
+    };
   }
 
   const categoryId = category._id.toString();
 
-  const transactionsToDelete = await Transaction.find({ userId: userId, categoryId: categoryId });
+  const transactionsToDelete = await Transaction.find({
+    userId: userId,
+    categoryId: categoryId,
+  });
   let totalSpentReverted = 0;
   let totalIncomeReverted = 0;
 
-  transactionsToDelete.forEach(t => {
-    if (t.type === 'expense') {
+  transactionsToDelete.forEach((t) => {
+    if (t.type === "expense") {
       totalSpentReverted += t.amount;
-    } else if (t.type === 'income') {
+    } else if (t.type === "income") {
       totalIncomeReverted += t.amount;
     }
   });
 
-  const deleteResult = await Transaction.deleteMany({ userId: userId, categoryId: categoryId });
+  const deleteResult = await Transaction.deleteMany({
+    userId: userId,
+    categoryId: categoryId,
+  });
 
   await Category.findByIdAndDelete(categoryId);
 
   await UserStats.findOneAndUpdate(
-    { userId: category.userId }, 
-    { 
-      $inc: { 
+    { userId: category.userId },
+    {
+      $inc: {
         totalSpent: -totalSpentReverted,
-        totalIncome: -totalIncomeReverted 
-      } 
+        totalIncome: -totalIncomeReverted,
+      },
     }
   );
 
-  return { 
-    success: true, 
-    message: `🗑️ Categoria "*${category.name}*" e *${deleteResult.deletedCount}* transações associadas foram excluídas com sucesso.` 
+  return {
+    success: true,
+    message: `🗑️ Categoria "*${category.name}*" e *${deleteResult.deletedCount}* transações associadas foram excluídas com sucesso.`,
   };
 }
 
@@ -857,15 +908,27 @@ export async function checkCategoryLimit(userId, categoryId, newExpenseAmount) {
   }
 
   const now = new Date();
-  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const currentMonth = `${now.getFullYear()}-${String(
+    now.getMonth() + 1
+  ).padStart(2, "0")}`;
 
-  const newTotal = await calculateTotalExpenses(userId, category.name, currentMonth);
-  
+  const newTotal = await calculateTotalExpenses(
+    userId,
+    category.name,
+    currentMonth
+  );
+
   const oldTotal = newTotal - newExpenseAmount;
 
   if (newTotal >= category.monthlyLimit && oldTotal < category.monthlyLimit) {
     const overage = newTotal - category.monthlyLimit;
-    return `⚠️ *Limite de Categoria Atingido!*\n\nVocê ultrapassou seu limite de *R$ ${category.monthlyLimit.toFixed(2)}* para a categoria "*${category.name}*".\n\nCom este novo gasto, você está *R$ ${overage.toFixed(2)}* acima do estimado para o mês.`;
+    return `⚠️ *Limite de Categoria Atingido!*\n\nVocê ultrapassou seu limite de *R$ ${category.monthlyLimit.toFixed(
+      2
+    )}* para a categoria "*${
+      category.name
+    }*".\n\nCom este novo gasto, você está *R$ ${overage.toFixed(
+      2
+    )}* acima do estimado para o mês.`;
   }
 
   return null;
