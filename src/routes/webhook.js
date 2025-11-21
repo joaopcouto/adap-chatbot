@@ -27,6 +27,7 @@ import {
 } from "../services/aiService.js";
 import { audioMessageHandler } from "../services/audioMessageHandler.js";
 import {
+  checkCategoryLimit,
   getMonthlySummary,
   calculateTotalExpenses,
   calculateTotalIncome,
@@ -1114,6 +1115,69 @@ async function processMessageForCloudApi(
         transactionId: newTransaction._id.toString(),
       });
 
+      delete conversationState[userIdString];
+    }
+    return;
+  }
+
+  // Handle delete category confirmation
+  if (previousData.awaiting === "delete_category_confirmation") {
+    const { categoryName } = previousData.payload;
+    const userInput = userMessage.trim().toLowerCase();
+
+    if (userInput === "sim" || userInput === "s") {
+      try {
+        const standardizedName = categoryName.trim().toLowerCase();
+        const categoryDoc = await Category.findOne({
+          userId: userIdString,
+          name: standardizedName,
+        });
+
+        if (!categoryDoc) {
+          await sendCloudApiResponse(
+            userPhoneNumber,
+            `🚫 Categoria "*${categoryName}*" não encontrada.`
+          );
+          delete conversationState[userIdString];
+          return;
+        }
+
+        // Buscar e deletar todas as transações da categoria
+        const transactions = await Transaction.find({
+          userId: userIdString,
+          categoryId: categoryDoc._id.toString(),
+        });
+
+        const totalAmount = transactions.reduce((sum, t) => sum + t.amount, 0);
+
+        // Deletar transações
+        await Transaction.deleteMany({
+          userId: userIdString,
+          categoryId: categoryDoc._id.toString(),
+        });
+
+        // Deletar categoria
+        await Category.deleteOne({ _id: categoryDoc._id });
+
+        await sendCloudApiResponse(
+          userPhoneNumber,
+          `✅ Categoria *${categoryName}* e ${transactions.length} lançamento(s) excluídos com sucesso.`
+        );
+
+        delete conversationState[userIdString];
+      } catch (error) {
+        console.error('Erro ao excluir categoria:', error);
+        await sendCloudApiResponse(
+          userPhoneNumber,
+          "❌ Erro ao excluir a categoria. Tente novamente."
+        );
+        delete conversationState[userIdString];
+      }
+    } else {
+      await sendCloudApiResponse(
+        userPhoneNumber,
+        `Ok, a exclusão da categoria *${categoryName}* foi cancelada.`
+      );
       delete conversationState[userIdString];
     }
     return;
@@ -2280,6 +2344,179 @@ async function processMessageForCloudApi(
             await sendCloudApiResponse(
               userPhoneNumber,
               "❌ Erro interno ao definir o alerta. Tente novamente."
+            );
+          }
+
+          break;
+        }
+
+        case "list_categories": {
+          try {
+            // Buscar todas as categorias do usuário
+            const categories = await Category.find({ userId: userIdString }).sort({ name: 1 });
+
+            if (!categories || categories.length === 0) {
+              await sendCloudApiResponse(
+                userPhoneNumber,
+                "📁 Você ainda não possui categorias criadas.\n\n" +
+                "As categorias são criadas automaticamente quando você registra despesas ou receitas."
+              );
+              break;
+            }
+
+            // Criar mensagem com lista de categorias
+            let message = "📁 *Suas Categorias e Limites Mensais:*\n\n";
+
+            categories.forEach(category => {
+              const categoryName = category.name.charAt(0).toUpperCase() + category.name.slice(1);
+              message += `• ${categoryName}`;
+              
+              if (category.monthlyLimit && category.monthlyLimit > 0) {
+                message += ` - Limite: R$ ${category.monthlyLimit.toFixed(2)}`;
+              }
+              
+              message += "\n";
+            });
+
+            message += "\n*Para definir um limite, envie:*\n";
+            message += "limite [categoria] para [valor]\n\n";
+            message += "*Para excluir, envie:*\n";
+            message += "excluir categoria [nome]";
+
+            await sendCloudApiResponse(userPhoneNumber, message);
+
+          } catch (error) {
+            console.error('Erro ao listar categorias:', error);
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              "❌ Erro ao buscar suas categorias. Tente novamente."
+            );
+          }
+
+          break;
+        }
+
+        case "set_category_limit": {
+          const { category, amount } = interpretation.data;
+
+          if (!category || amount === undefined || amount === null || amount <= 0) {
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              "🚫 Formato incorreto. Use: *limite [categoria] para [valor]*\n\nEx: 'limite alimentação para 500'"
+            );
+            break;
+          }
+
+          try {
+            const standardizedName = category.trim().toLowerCase();
+            const categoryDoc = await Category.findOne({
+              userId: userIdString,
+              name: standardizedName,
+            });
+
+            if (!categoryDoc) {
+              await sendCloudApiResponse(
+                userPhoneNumber,
+                `🚫 Categoria "*${category}*" não encontrada. Crie-a primeiro registrando um gasto nela.`
+              );
+              break;
+            }
+
+            await Category.updateOne(
+              { _id: categoryDoc._id },
+              { $set: { monthlyLimit: amount } }
+            );
+
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              `✅ Limite para a categoria *${category}* definido para *R$ ${amount.toFixed(2)}* por mês.`
+            );
+
+          } catch (error) {
+            console.error('Erro ao definir limite de categoria:', error);
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              "❌ Erro ao definir o limite. Tente novamente."
+            );
+          }
+
+          break;
+        }
+
+        case "delete_category": {
+          // Verificar se usuário tem acesso a categorias personalizadas
+          const userHasFreeCategorization = await hasAccessToFeature(
+            userObjectId,
+            "categories"
+          );
+
+          if (!userHasFreeCategorization) {
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              "🚫 A exclusão de categorias personalizadas está disponível apenas como um complemento."
+            );
+            break;
+          }
+
+          const { category } = interpretation.data;
+
+          if (!category) {
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              "Por favor, especifique o nome da categoria que deseja excluir. Ex: *excluir categoria lazer*"
+            );
+            break;
+          }
+
+          try {
+            const standardizedName = category.trim().toLowerCase();
+            const categoryDoc = await Category.findOne({
+              userId: userIdString,
+              name: standardizedName,
+            });
+
+            if (!categoryDoc) {
+              await sendCloudApiResponse(
+                userPhoneNumber,
+                `🚫 Categoria "*${category}*" não encontrada.`
+              );
+              break;
+            }
+
+            // Buscar transações associadas à categoria
+            const transactions = await Transaction.find({
+              userId: userIdString,
+              categoryId: categoryDoc._id.toString(),
+            });
+
+            const totalAmount = transactions.reduce(
+              (sum, t) => sum + t.amount,
+              0
+            );
+
+            // Criar mensagem de confirmação com detalhes
+            let detailsMessage = `Você está prestes a excluir a categoria *${category}*.\n\n`;
+            detailsMessage += `Isso irá apagar permanentemente *${transactions.length}* lançamento(s), totalizando *R$ ${totalAmount.toFixed(2)}*.\n\n`;
+            
+            if (transactions.length > 0) {
+              detailsMessage += `Digite *detalhes* para revisar, você ainda deseja excluir a categoria *${category}* e todos os lançamentos acima? Responda *sim* para confirmar.`;
+            } else {
+              detailsMessage += `Responda *sim* para confirmar a exclusão.`;
+            }
+
+            // Salvar estado da conversa para confirmação
+            conversationState[userIdString] = {
+              awaiting: "delete_category_confirmation",
+              payload: { categoryName: category },
+            };
+
+            await sendCloudApiResponse(userPhoneNumber, detailsMessage);
+
+          } catch (error) {
+            console.error('Erro ao processar exclusão de categoria:', error);
+            await sendCloudApiResponse(
+              userPhoneNumber,
+              "❌ Erro ao processar a exclusão. Tente novamente."
             );
           }
 
